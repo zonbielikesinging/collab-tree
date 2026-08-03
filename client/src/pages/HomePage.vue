@@ -20,44 +20,82 @@
         <button class="btn btn-primary" @click="onCreateCanvas">＋ 新建画布</button>
       </div>
 
-      <div v-if="canvases.length === 0" class="empty-state">
+      <div v-if="myCanvases.length === 0 && sharedCanvases.length === 0" class="empty-state">
         <span class="empty-icon">📋</span>
         <p>还没有画布，点击上方按钮创建第一个</p>
       </div>
 
-      <div v-else class="canvas-grid">
-        <div
-          v-for="canvas in canvases"
-          :key="canvas.id"
-          class="canvas-card"
-          @click="openCanvas(canvas.id)"
-        >
-          <div class="card-preview">
-            <svg viewBox="0 0 200 120" class="card-svg">
-              <rect x="10" y="10" width="60" height="30" rx="6" fill="#4A90D9" opacity="0.8" />
-              <text x="40" y="29" text-anchor="middle" fill="white" font-size="10" font-weight="bold">Node</text>
-              <line x1="40" y1="40" x2="40" y2="55" stroke="#667788" stroke-width="1.5" />
-              <rect x="10" y="55" width="50" height="22" rx="5" fill="#27ae60" opacity="0.7" />
-              <rect x="70" y="55" width="50" height="22" rx="5" fill="#e67e22" opacity="0.7" />
-              <line x1="40" y1="55" x2="40" y2="55" stroke="#667788" />
-              <line x1="40" y1="55" x2="35" y2="66" stroke="#667788" stroke-width="1" />
-              <line x1="40" y1="55" x2="95" y2="66" stroke="#667788" stroke-width="1" />
-            </svg>
-          </div>
-          <div class="card-info">
-            <div class="card-name" :title="canvas.name">{{ canvas.name }}</div>
-            <div class="card-meta">
-              <span>{{ canvas.nodeCount }} 节点</span>
-              <span>·</span>
-              <span>{{ formatDate(canvas.createdAt) }}</span>
+      <template v-else>
+        <!-- My canvases -->
+        <section v-if="myCanvases.length > 0" class="canvas-section">
+          <h3 class="section-title">📁 我的画布</h3>
+          <div class="canvas-grid">
+            <div
+              v-for="canvas in myCanvases"
+              :key="canvas.id"
+              class="canvas-card"
+              @click="openCanvas(canvas.id)"
+            >
+              <div class="card-preview">
+                <svg viewBox="0 0 200 120" class="card-svg">
+                  <rect x="10" y="10" width="60" height="30" rx="6" fill="#4A90D9" opacity="0.8" />
+                  <text x="40" y="29" text-anchor="middle" fill="white" font-size="10" font-weight="bold">Node</text>
+                  <line x1="40" y1="40" x2="40" y2="55" stroke="#667788" stroke-width="1.5" />
+                  <rect x="10" y="55" width="50" height="22" rx="5" fill="#27ae60" opacity="0.7" />
+                  <rect x="70" y="55" width="50" height="22" rx="5" fill="#e67e22" opacity="0.7" />
+                </svg>
+              </div>
+              <div class="card-info">
+                <div class="card-name" :title="canvas.name">{{ canvas.name }}</div>
+                <div class="card-meta">
+                  <span>{{ canvas.nodeCount }} 节点</span>
+                  <span>·</span>
+                  <span>{{ formatDate(canvas.createdAt) }}</span>
+                </div>
+              </div>
+              <div class="card-actions" @click.stop>
+                <button class="card-btn" @click="startRename(canvas)" title="重命名">✏️</button>
+                <button class="card-btn" @click="onDeleteCanvas(canvas.id)" title="删除">🗑️</button>
+              </div>
             </div>
           </div>
-          <div class="card-actions" @click.stop>
-            <button class="card-btn" @click="startRename(canvas)" title="重命名">✏️</button>
-            <button class="card-btn" @click="onDeleteCanvas(canvas.id)" title="删除">🗑️</button>
+        </section>
+
+        <!-- Shared canvases -->
+        <section v-if="sharedCanvases.length > 0" class="canvas-section">
+          <div class="shared-divider"></div>
+          <h3 class="section-title">🤝 协作画布</h3>
+          <div class="canvas-grid">
+            <div
+              v-for="canvas in sharedCanvases"
+              :key="canvas.id"
+              class="canvas-card shared-card"
+              @click="openCanvas(canvas.id)"
+            >
+              <div class="card-preview shared-preview">
+                <svg viewBox="0 0 200 120" class="card-svg">
+                  <rect x="10" y="10" width="60" height="30" rx="6" fill="#9b59b6" opacity="0.8" />
+                  <text x="40" y="29" text-anchor="middle" fill="white" font-size="10" font-weight="bold">Node</text>
+                  <line x1="40" y1="40" x2="40" y2="55" stroke="#667788" stroke-width="1.5" />
+                  <rect x="10" y="55" width="50" height="22" rx="5" fill="#27ae60" opacity="0.7" />
+                  <rect x="70" y="55" width="50" height="22" rx="5" fill="#e67e22" opacity="0.7" />
+                </svg>
+              </div>
+              <div class="card-info">
+                <div class="card-name" :title="canvas.name">{{ canvas.name }}</div>
+                <div class="card-meta">
+                  <span class="shared-badge">🔗 分享</span>
+                  <span>·</span>
+                  <span>{{ formatDate(canvas.createdAt) }}</span>
+                </div>
+              </div>
+              <div class="card-actions" @click.stop>
+                <button class="card-btn" @click="onDeleteCanvas(canvas.id)" title="移除">🗑️</button>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+        </section>
+      </template>
 
       <!-- Rename dialog -->
       <div v-if="renaming" class="modal-overlay" @click="renaming = null">
@@ -108,7 +146,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCanvases } from '../composables/useCanvases.js'
 import { useUserIdentity } from '../composables/useUserIdentity.js'
@@ -123,6 +161,8 @@ const userColor = ref(identity.userColor)
 const userInitials = ref(identity.userInitials)
 
 const canvases = ref([])
+const myCanvases = computed(() => canvases.value.filter(c => c.ownerId === userId))
+const sharedCanvases = computed(() => canvases.value.filter(c => c.ownerId !== userId || (c.visitors?.includes(userId) && c.ownerId !== userId)))
 const renaming = ref(null)
 const renameValue = ref('')
 const renameInput = ref(null)
@@ -152,11 +192,11 @@ function randomizeName() {
 }
 
 async function loadCanvases() {
-  canvases.value = await listCanvases()
+  canvases.value = await listCanvases(userId)
 }
 
 async function onCreateCanvas() {
-  const canvas = await createCanvas('新画布')
+  const canvas = await createCanvas('新画布', userId)
   router.push(`/canvas/${canvas.id}`)
 }
 
@@ -460,5 +500,29 @@ onMounted(async () => { await loadCanvases() })
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+/* Section divider for shared canvases */
+.canvas-section { margin-bottom: 32px; }
+.section-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #555;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #eee;
+}
+.shared-divider {
+  border-top: 2px dashed #e0e0e0;
+  margin: 8px 0 24px;
+}
+.shared-card { border-left: 3px solid #9b59b6; }
+.shared-preview {
+  background: linear-gradient(135deg, #f3e5f5, #e8daef);
+}
+.shared-badge {
+  font-size: 11px;
+  color: #9b59b6;
+  font-weight: 600;
 }
 </style>

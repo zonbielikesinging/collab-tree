@@ -152,7 +152,7 @@ import DebugPanel from '../components/DebugPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
-const { getCanvas, updateNodeCount } = useCanvases()
+const { getCanvas, updateNodeCount, visitCanvas } = useCanvases()
 
 // ── User identity ──
 const identity = useUserIdentity()
@@ -268,17 +268,31 @@ function goHome() {
 
 // ── Init collaboration after provider connects ──
 onMounted(() => {
+  // Register visit for shared canvases (auto-save to user's list)
+  const canvasInfo = getCanvas(canvasId.value)
+  if (!canvasInfo || canvasInfo.ownerId !== userId) {
+    visitCanvas(canvasId.value, userId, canvasInfo?.name, canvasInfo?.ownerId)
+  }
+
   let attempts = 0
   const tryInit = () => {
     if (wsProvider && wsProvider.wsconnected) {
       initCollab()
       initUndo()
-    } else if (attempts < 20) {
+    } else if (attempts < 50) {
       attempts++
-      setTimeout(tryInit, 300)
+      setTimeout(tryInit, 200)
+    } else {
+      console.warn('[CollabTree] Collaboration init timeout after 10s')
     }
   }
   tryInit()
+  // Also listen for sync event as fallback
+  wsProvider?.on?.('sync', () => {
+    if (!remoteUsers.value.length) {
+      initCollab()
+    }
+  })
 
   // Keyboard shortcuts
   window.addEventListener('keydown', onKeydown)

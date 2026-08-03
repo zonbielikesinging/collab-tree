@@ -1,6 +1,7 @@
 // ── Canvas management ──
 // Persists canvas list to localStorage (cache) + server API (source of truth).
 // Each canvas maps to a Yjs room name.
+// Supports "my canvases" (ownerId === userId) and "shared canvases" (visited).
 
 const STORAGE_KEY = 'collabtree_canvases'
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:1234'
@@ -56,15 +57,21 @@ export function useCanvases() {
     })
   }
 
+  async function visitServer(id, userId, name, ownerId) {
+    return apiFetch(`/api/canvases/${encodeURIComponent(id)}/visit`, {
+      method: 'POST',
+      body: JSON.stringify({ userId, name, ownerId }),
+    })
+  }
+
   // ── CRUD ──
-  async function listCanvases() {
-    // Try server first
-    const serverList = await apiFetch('/api/canvases')
+  async function listCanvases(userId) {
+    const query = userId ? `?userId=${encodeURIComponent(userId)}` : ''
+    const serverList = await apiFetch(`/api/canvases${query}`)
     if (serverList && Array.isArray(serverList) && serverList.length > 0) {
       saveCache(serverList)
       return serverList
     }
-    // Fallback to local cache
     return loadCache()
   }
 
@@ -72,7 +79,7 @@ export function useCanvases() {
     return loadCache().find(c => c.id === id) || null
   }
 
-  async function createCanvas(name = '新画布') {
+  async function createCanvas(name = '新画布', userId) {
     const list = loadCache()
     const id = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
     const room = `canvas-${id}`
@@ -80,23 +87,41 @@ export function useCanvases() {
       id, name, room,
       createdAt: new Date().toISOString(),
       nodeCount: 0,
+      ownerId: userId || 'unknown',
+      visitors: [],
     }
     list.push(canvas)
     saveCache(list)
-
-    // Sync to server
     syncToServer(canvas).catch(() => {})
     return canvas
+  }
+
+  // Register a visit to a shared canvas (called when opening a shared link)
+  async function visitCanvas(id, userId, name, ownerId) {
+    const list = loadCache()
+    const existing = list.find(c => c.id === id)
+    if (!existing) {
+      // Add to local cache
+      const canvas = {
+        id,
+        name: name || '分享的画布',
+        room: `canvas-${id}`,
+        createdAt: new Date().toISOString(),
+        nodeCount: 0,
+        ownerId: ownerId || 'unknown',
+        visitors: [],
+      }
+      list.push(canvas)
+      saveCache(list)
+    }
+    // Sync visit to server
+    visitServer(id, userId, name, ownerId).catch(() => {})
   }
 
   async function deleteCanvas(id) {
     const list = loadCache().filter(c => c.id !== id)
     saveCache(list)
-
-    // Delete from server
     deleteFromServer(id).catch(() => {})
-
-    // Clear IndexedDB
     try {
       const room = `canvas-${id}`
       const dbName = `yjs-${room}`
@@ -122,7 +147,6 @@ export function useCanvases() {
     if (canvas) {
       canvas.nodeCount = count
       saveCache(list)
-      // No need to sync nodeCount to server immediately — debounced
     }
   }
 
@@ -130,6 +154,7 @@ export function useCanvases() {
     listCanvases,
     getCanvas,
     createCanvas,
+    visitCanvas,
     deleteCanvas,
     renameCanvas,
     updateNodeCount,

@@ -193,9 +193,20 @@ async function handleRequest(req, res) {
 
   // ── REST API ──
 
-  // GET /api/canvases
-  if (req.method === 'GET' && req.url === '/api/canvases') {
-    return jsonResponse(res, readCanvases())
+  // GET /api/canvases?userId=xxx
+  if (req.method === 'GET' && req.url.startsWith('/api/canvases')) {
+    const url = new URL(req.url, `http://${req.headers.host}`)
+    const userId = url.searchParams.get('userId')
+    const all = readCanvases()
+
+    if (userId) {
+      // Filter: return canvases owned by this user + canvases they visited
+      const userCanvases = all.filter(c =>
+        c.ownerId === userId || (c.visitors && c.visitors.includes(userId))
+      )
+      return jsonResponse(res, userCanvases)
+    }
+    return jsonResponse(res, all)
   }
 
   // GET /api/tunnel — get the public tunnel URL
@@ -228,6 +239,8 @@ async function handleRequest(req, res) {
       room: body.room || `canvas-${body.id}`,
       createdAt: body.createdAt || new Date().toISOString(),
       nodeCount: body.nodeCount || 0,
+      ownerId: body.ownerId || 'unknown',
+      visitors: body.visitors || [],
     }
     if (existing >= 0) {
       list[existing] = { ...list[existing], ...canvas }
@@ -237,6 +250,41 @@ async function handleRequest(req, res) {
     writeCanvases(list)
     console.log(`[api] Canvas created/updated: ${canvas.id}`)
     return jsonResponse(res, canvas)
+  }
+
+  // POST /api/canvases/:id/visit — register a user visit (shared canvas)
+  if (req.method === 'POST' && req.url.startsWith('/api/canvases/') && req.url.endsWith('/visit')) {
+    const parts = req.url.split('/')
+    const id = decodeURIComponent(parts[3])
+    if (!id) return jsonResponse(res, { error: 'Missing id' }, 400)
+    const body = await readBody(req)
+    const userId = body?.userId
+    if (!userId) return jsonResponse(res, { error: 'Missing userId' }, 400)
+
+    const list = readCanvases()
+    const idx = list.findIndex(c => c.id === id)
+    if (idx < 0) {
+      // Canvas not in list yet — add it as a shared canvas
+      const canvas = {
+        id,
+        name: body.name || '分享的画布',
+        room: `canvas-${id}`,
+        createdAt: new Date().toISOString(),
+        nodeCount: 0,
+        ownerId: body.ownerId || 'unknown',
+        visitors: [userId],
+      }
+      list.push(canvas)
+    } else {
+      // Add visitor if not already present
+      const visitors = list[idx].visitors || []
+      if (!visitors.includes(userId)) {
+        visitors.push(userId)
+        list[idx].visitors = visitors
+      }
+    }
+    writeCanvases(list)
+    return jsonResponse(res, { ok: true })
   }
 
   // DELETE /api/canvases/:id

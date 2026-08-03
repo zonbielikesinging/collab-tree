@@ -1,17 +1,25 @@
 import { ref, shallowRef, onUnmounted } from 'vue'
 import * as Y from 'yjs'
+import { WebrtcProvider } from 'y-webrtc'
 import { WebsocketProvider } from 'y-websocket'
 import { IndexeddbPersistence } from 'y-indexeddb'
 import { nanoid } from 'nanoid'
 
-// Auto-detect WS URL from current page location (for remote sharing)
-// In production mode, WS and HTTP are on the same port
+// Auto-detect WS URL from current page location
 function detectWsUrl() {
   if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL
   const host = window.location.host || 'localhost:1234'
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${protocol}//${host}`
 }
+
+// Signaling servers for WebRTC (public, no auth needed)
+const SIGNALING_SERVERS = [
+  'wss://signaling.yjs.dev',
+  'wss://y-webrtc-signaling-eu.herokuapp.com',
+  'wss://y-webrtc-signaling-us.herokuapp.com',
+]
+
 const WS_URL = detectWsUrl()
 const ROOM_NAME = 'default-tree'
 
@@ -23,7 +31,6 @@ const DEFAULTS = Object.freeze({
 
 /**
  * Build a plain JS tree node from Yjs data.
- * Applies defaults for missing fields (read-only, no write-back).
  */
 function buildTree(nodesMap, id) {
   const node = nodesMap.get(id)
@@ -43,28 +50,55 @@ function findParentId(nodesMap, childId) {
 }
 
 export function useYjsTree(roomRef) {
-  // ── Resolve room name ──
   const roomName = typeof roomRef === 'string' ? roomRef : (roomRef?.value || ROOM_NAME)
 
   // ── Yjs doc + providers ──────────────────────────────────────────
   const ydoc = new Y.Doc()
-  const wsProvider = new WebsocketProvider(WS_URL, roomName, ydoc, { connect: true, maxBackoffTime: 10_000 })
-  const idbPersistence = new IndexeddbPersistence(roomName, ydoc)
   const connected = ref(false)
   const synced = ref(false)
+  let providers = []
 
-  wsProvider.on('status', ({ status }) => { connected.value = status === 'connected' })
-  wsProvider.on('synced', (state) => { synced.value = state })
+  // Try WebSocket first (local network), then WebRTC (public)
+  // We use both: WebSocket for LAN, WebRTC for public internet
+  const wsProvider = new WebsocketProvider(WS_URL, roomName, ydoc, { connect: true, maxBackoffTime: 10_000 })
+  providers.push(wsProvider)
+
+  wsProvider.on('status', ({ status }) => {
+    if (status === 'connected') connected.value = true
+  })
+  wsProvider.on('synced', (state) => { synced.value = synced.value || state })
+
+  // WebRTC provider for P2P (works through NAT/firewalls, ideal for public deploy)
+  const rtcProvider = new WebrtcProvider(roomName, ydoc, {
+    signaling: SIGNALING_SERVERS,
+    password: null,
+    awareness: wsProvider.awareness,
+    maxConns: 30,
+    filterBcConns: true,
+    peerOpts: {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+      ]
+    }
+  })
+  providers.push(rtcProvider)
+
+  rtcProvider.on('peers', ({ added, removed, webrtcProvider }) => {
+    const peerCount = rtcProvider.peers?.length || 0
+    if (peerCount > 0) connected.value = true
+  })
+
+  const idbPersistence = new IndexeddbPersistence(roomName, ydoc)
 
   const treeMap = ydoc.getMap('tree')
   let nodesMap = treeMap.get('nodes')
 
-  // ── One-time init: after IndexedDB loads, create default if empty ──
+  // ── One-time init ──
   let initialised = false
   const initTree = () => {
     if (initialised) return
     initialised = true
-    // Refresh nodesMap reference (may have been replaced by IndexedDB)
     nodesMap = treeMap.get('nodes')
     const rid = treeMap.get('rootId')
     if (!nodesMap || nodesMap.size === 0 || !rid || !nodesMap.has(rid)) {
@@ -89,13 +123,11 @@ export function useYjsTree(roomRef) {
         nodesMap = newNodesMap
       })
     }
-    // Always sync rootId from treeMap
     rootId.value = treeMap.get('rootId')
     forceRefresh()
   }
 
   idbPersistence.on('synced', initTree)
-  // Fallback: if already synced or no IDB data, init after 500ms
   setTimeout(initTree, 500)
 
   // ── Reactive state ────────────────────────────────────────────────
@@ -103,7 +135,6 @@ export function useYjsTree(roomRef) {
   const selectedNodeId = ref(null)
   const rootId = ref(treeMap.get('rootId'))
 
-  // ── Build tree snapshot (never returns null if root exists) ───────
   function toTreeData() {
     const nm = nodesMap || treeMap.get('nodes')
     if (!nm) return null
@@ -117,22 +148,16 @@ export function useYjsTree(roomRef) {
     if (td !== null) treeData.value = td
   }
 
-  // ── observeDeep on treeMap, but only update treeData when valid ───
   let refreshTimer = null
   function scheduleRefresh() {
     clearTimeout(refreshTimer)
     refreshTimer = setTimeout(() => {
       const td = toTreeData()
-      // CRITICAL: never set treeData to null if we already have data
-      if (td !== null) {
-        treeData.value = td
-      }
+      if (td !== null) treeData.value = td
     }, 0)
   }
 
   treeMap.observeDeep(() => scheduleRefresh())
-
-  // Initial build
   forceRefresh()
 
   // ── CRUD operations ───────────────────────────────────────────────
@@ -235,7 +260,7 @@ export function useYjsTree(roomRef) {
 
   function destroy() {
     clearTimeout(refreshTimer)
-    wsProvider.destroy()
+    for (const p of providers) p.destroy()
     idbPersistence.destroy()
     ydoc.destroy()
   }
