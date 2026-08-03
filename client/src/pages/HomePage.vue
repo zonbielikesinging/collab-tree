@@ -54,7 +54,7 @@
                 </div>
               </div>
               <div class="card-actions" @click.stop>
-                <button class="card-btn" @click="startRename(canvas)" title="重命名">✏️</button>
+                <button v-if="canvas.ownerId === userId" class="card-btn" @click="startRename(canvas)" title="重命名">✏️</button>
                 <button class="card-btn" @click="onDeleteCanvas(canvas.id)" title="删除">🗑️</button>
               </div>
             </div>

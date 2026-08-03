@@ -12,39 +12,37 @@
 //   selectedNodeId: string | null,
 //   editingNodeId: string | null,
 //   dragging: { nodeId: string, x: number, y: number } | null,
-//   cursor: { x: number, y: number } | null,
 //   lastActive: number
 // }
 
-import { ref, shallowRef, computed, watch, onUnmounted } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 
-const AWARENESS_THROTTLE_MS = 50
-
-export function useCollaboration(providerRef, userIdentity) {
-  const { userId, userName, userColor } = userIdentity
-
+export function useCollaboration(providerRef, getIdentity) {
   // ── Reactive state ──
-  const remoteUsers = ref([])        // Array of { clientId, name, color, ... }
-  const remoteCursors = ref([])      // Cursor positions to render on SVG
-  const remoteEditingNodeIds = ref(new Set()) // Nodes being edited by others
-  const remoteDragging = ref([])     // Nodes being dragged by others
-  const remoteSelectedNodeIds = ref([]) // Nodes selected by others
+  const remoteUsers = ref([])
+  const remoteCursors = ref([])
+  const remoteEditingNodeIds = ref(new Set())
+  const remoteDragging = ref([])
+  const remoteSelectedNodeIds = ref([])
 
   let awareness = null
-  let lastThrottledUpdate = 0
+  let localStateUpdateTimer = null
+  let pendingLocalState = null
 
   // ── Initialize awareness when provider is ready ──
   function init() {
     const provider = typeof providerRef === 'function' ? providerRef() : providerRef?.value
     if (!provider) return false
     awareness = provider.awareness
+    if (!awareness) return false
 
-    // Set local state
+    // Set local state from identity (which is now a function that returns live values)
+    const id = getIdentity()
     awareness.setLocalState({
-      userId,
-      name: userName,
-      color: userColor,
-      initials: userIdentity.userInitials || userName[0],
+      userId: id.userId,
+      name: id.userName,
+      color: id.userColor,
+      initials: id.userInitials,
       selectedNodeId: null,
       editingNodeId: null,
       dragging: null,
@@ -55,7 +53,7 @@ export function useCollaboration(providerRef, userIdentity) {
     awareness.on('change', () => {
       const states = awareness.getStates()
       const now = Date.now()
-      const stale = now - 30_000 // 30s timeout
+      const stale = now - 30_000
 
       const users = []
       const cursors = []
@@ -83,6 +81,7 @@ export function useCollaboration(providerRef, userIdentity) {
           cursors.push({
             clientId,
             userId: state.userId,
+            name: state.name,
             color: state.color || '#999',
             selectedNodeId: state.selectedNodeId,
           })
@@ -97,6 +96,7 @@ export function useCollaboration(providerRef, userIdentity) {
           dragging.push({
             clientId,
             userId: state.userId,
+            name: state.name,
             color: state.color || '#999',
             nodeId: state.dragging.nodeId,
             x: state.dragging.x,
@@ -115,16 +115,18 @@ export function useCollaboration(providerRef, userIdentity) {
     return true
   }
 
-  // ── Update local awareness state ──
+  // ── Update local awareness state (batched via microtask, no throttle) ──
   function updateState(patch) {
     if (!awareness) return
-    const now = Date.now()
-    // Throttle to avoid flooding
-    if (now - lastThrottledUpdate < AWARENESS_THROTTLE_MS) return
-    lastThrottledUpdate = now
-
-    const current = awareness.getLocalState() || {}
-    awareness.setLocalState({ ...current, ...patch, lastActive: now })
+    pendingLocalState = patch
+    if (localStateUpdateTimer) return
+    localStateUpdateTimer = setTimeout(() => {
+      localStateUpdateTimer = null
+      if (!pendingLocalState || !awareness) return
+      const current = awareness.getLocalState() || {}
+      awareness.setLocalState({ ...current, ...pendingLocalState, lastActive: Date.now() })
+      pendingLocalState = null
+    }, 0)
   }
 
   function setSelectedNode(nodeId) {
@@ -160,6 +162,7 @@ export function useCollaboration(providerRef, userIdentity) {
 
   // ── Cleanup ──
   function destroy() {
+    clearTimeout(localStateUpdateTimer)
     if (awareness) {
       awareness.setLocalState(null)
     }
@@ -168,7 +171,6 @@ export function useCollaboration(providerRef, userIdentity) {
   onUnmounted(() => destroy())
 
   return {
-    // State
     remoteUsers,
     remoteCursors,
     remoteDragging,
@@ -176,7 +178,6 @@ export function useCollaboration(providerRef, userIdentity) {
     remoteEditingNodeIds,
     onlineCount,
 
-    // Actions
     init,
     updateState,
     setSelectedNode,
@@ -184,7 +185,6 @@ export function useCollaboration(providerRef, userIdentity) {
     setDragging,
     clearAll,
 
-    // Helpers
     isNodeBeingEdited,
     editorsForNode,
 

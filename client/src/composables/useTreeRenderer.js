@@ -1,7 +1,6 @@
 // ── D3 tree renderer ──
-// Builds hierarchy, layout, links, nodes, and zoom.
-// Delegates per-node drawing to useNodeDrawing and
-// interaction wiring to useNodeInteraction.
+// Incremental rendering: full re-render only on structural changes,
+// otherwise update positions/attributes in-place for smooth panning.
 
 import * as d3 from 'd3'
 import { nodeSize, nodeCenter, drawNode, drawDragHandle, drawExpandBtn, drawCollapseBtn, drawChildCount, drawResizeHandle } from './useNodeDrawing.js'
@@ -9,6 +8,8 @@ import { wireNodeInteractions, isInteractiveTarget } from './useNodeInteraction.
 import { resolveCollisions } from './useLayout.js'
 
 const H_GAP = 120, V_GAP = 160
+
+let cachedTreeJson = null  // JSON snapshot of last treeData (for structural diff)
 
 export function buildHierarchy(data) {
   if (!data) return null
@@ -33,110 +34,89 @@ export function renderTree(svgEl, container, treeData, selectedNodeId, emit, col
   const W = container.clientWidth || 800
   const H = container.clientHeight || 600
   svg.attr('viewBox', `0 0 ${W} ${H}`)
-  svg.selectAll('*').remove()
 
-  // defs
-  setupDefs(svg)
+  // Detect structural change: compare node IDs and children structure
+  const newJson = JSON.stringify(treeData, (key, val) => {
+    if (key === 'x' || key === 'y' || key === 'content' || key === 'label' || key === 'color') return undefined
+    return val
+  })
+  const structureChanged = newJson !== cachedTreeJson
+  cachedTreeJson = newJson
 
-  const g = svg.append('g')
+  const g = svg.select('g.main')
+  if (g.empty() || structureChanged) {
+    // Full re-render
+    svg.selectAll('*').remove()
+    setupDefs(svg)
+    fullRender(svg, container, treeData, selectedNodeId, emit, collaborationState)
+  } else {
+    // Incremental: only update positions, colors, labels, selection
+    incrementalRender(svg, g, treeData, selectedNodeId, emit, collaborationState)
+  }
+}
 
-  // Zoom: pan + wheel on background rect only
+function fullRender(svg, container, treeData, selectedNodeId, emit, collaborationState) {
+  const W = container.clientWidth || 800
+  const H = container.clientHeight || 600
+
+  const g = svg.append('g').attr('class', 'main')
+
   let currentTransform = d3.zoomIdentity
-  const zoom = d3.zoom().scaleExtent([0.15, 4]).on('zoom', e => {
+  const zoom = d3.zoom().scaleExtent([0.1, 5]).on('zoom', e => {
     currentTransform = e.transform
     g.attr('transform', e.transform)
   })
 
-  // Background rect catches all zoom interactions (pan + wheel)
   const bgRect = g.insert('rect', ':first-child')
-    .attr('width', W * 4).attr('height', H * 4)
-    .attr('x', -W * 2).attr('y', -H * 2)
+    .attr('class', 'bg')
+    .attr('width', W * 6).attr('height', H * 6)
+    .attr('x', -W * 3).attr('y', -H * 3)
     .attr('fill', 'transparent')
     .style('pointer-events', 'all')
   bgRect.call(zoom)
 
   const root = buildHierarchy(treeData)
-  if (!root) {
-    emit('debug-log', '[TC] render skip: buildHierarchy returned null')
-    return
-  }
+  if (!root) return
 
   const treeLayout = d3.tree().nodeSize([H_GAP, V_GAP])
     .separation((a, b) => ((nodeSize(a).w + nodeSize(b).w) / 2 + 50) / H_GAP)
   treeLayout(root)
 
-  // Run collision resolution to prevent overlapping nodes
   const descendants = root.descendants()
   resolveCollisions(descendants)
-
-  // link helpers
-  function updateLinks(nodeId, cx, cy) {
-    svg.selectAll('path.link')
-      .filter(ld => ld.source.data.id === nodeId || ld.target.data.id === nodeId)
-      .attr('d', ld => {
-        const szS = nodeSize(ld.source), szT = nodeSize(ld.target)
-        const s = ld.source.data.id === nodeId ? { cx, cy } : nodeCenter(ld.source)
-        const t = ld.target.data.id === nodeId ? { cx, cy } : nodeCenter(ld.target)
-        return d3.linkVertical()({ source: [s.cx, s.cy + szS.h / 2], target: [t.cx, t.cy - szT.h / 2] })
-      })
-  }
-  function updateLinksResize(nodeId, w, h) {
-    svg.selectAll('path.link')
-      .filter(ld => ld.source.data.id === nodeId || ld.target.data.id === nodeId)
-      .attr('d', ld => {
-        const szS = nodeSize(ld.source), szT = nodeSize(ld.target)
-        const s = nodeCenter(ld.source), t = nodeCenter(ld.target)
-        let sH = szS.h, tH = szT.h
-        if (ld.source.data.id === nodeId) sH = h
-        if (ld.target.data.id === nodeId) tH = h
-        return d3.linkVertical()({ source: [s.cx, s.cy + sH / 2], target: [t.cx, t.cy - tH / 2] })
-      })
-  }
 
   // links
   g.selectAll('path.link').data(root.links()).join('path')
     .attr('class', 'link').attr('fill', 'none').attr('stroke', '#667788')
     .attr('stroke-width', 2.5).attr('opacity', 0.65).attr('marker-end', 'url(#arrow)')
-    .attr('d', d => {
-      const szS = nodeSize(d.source), szT = nodeSize(d.target)
-      const s = nodeCenter(d.source), t = nodeCenter(d.target)
-      return d3.linkVertical()({ source: [s.cx, s.cy + szS.h / 2], target: [t.cx, t.cy - szT.h / 2] })
-    })
+    .attr('d', d => linkPath(d))
 
   // nodes
   const nodeG = g.selectAll('g.node').data(descendants).join('g')
-    .attr('class', 'node').attr('filter', 'url(#shadow)')
+    .attr('class', 'node')
+    .attr('filter', 'url(#shadow)')
     .style('pointer-events', 'all')
-    .attr('transform', d => {
-      const sz = nodeSize(d), c = nodeCenter(d)
-      return `translate(${c.cx - sz.w / 2}, ${c.cy - sz.h / 2})`
-    })
+    .attr('transform', d => nodeTransform(d))
 
-  // draw each node
   nodeG.each(function (d) {
     const el = d3.select(this)
     const { btnY, sz } = drawNode(el, d, { selectedNodeId })
 
-    // Invisible overlay rect to capture click events on node body
-    // (SVG <g> elements don't have a fill, so pointer events pass through)
     el.insert('rect', ':first-child')
       .attr('class', 'node-body')
       .attr('width', sz.w).attr('height', sz.h).attr('rx', 10)
       .attr('fill', 'transparent')
       .style('pointer-events', 'all')
 
-    // draw interactive zones
     drawDragHandle(el, sz)
     drawExpandBtn(el, d, btnY)
     drawCollapseBtn(el, d, sz, btnY)
     drawChildCount(el, d, sz, btnY)
     drawResizeHandle(el, sz)
 
-    // wire interactions
-    const ctx = { svgEl, g, emit, updateLinks, updateLinksResize }
+    const ctx = { svgEl: svg.node(), g, emit, updateLinks, updateLinksResize }
     wireNodeInteractions(el, d, ctx)
 
-    // Remote editing indicator
     if (collaborationState && collaborationState.isNodeBeingEdited && collaborationState.isNodeBeingEdited(d.data.id)) {
       el.append('rect')
         .attr('class', 'remote-editing')
@@ -150,23 +130,20 @@ export function renderTree(svgEl, container, treeData, selectedNodeId, emit, col
     }
   })
 
-  // ── Remote collaboration cursors ──
-  if (collaborationState) {
-    drawRemoteCursors(svg, g, collaborationState)
-  }
+  // Remote cursors
+  if (collaborationState) drawRemoteCursors(svg, g, collaborationState)
 
-  // click on node body (D3 event, fires on the <g> element)
+  // Click handlers
   nodeG.on('click', function (event, d) {
-    if (isInteractiveTarget(event.target, svgEl)) return
+    if (isInteractiveTarget(event.target, svg.node())) return
     emit('node-click', d.data.id)
   })
   nodeG.on('dblclick', function (event, d) {
-    if (isInteractiveTarget(event.target, svgEl)) return
+    if (isInteractiveTarget(event.target, svg.node())) return
     event.stopPropagation()
     emit('node-dblclick', d.data.id)
   })
 
-  // expand/collapse buttons
   svg.selectAll('.btn-expand').on('click', function (event, d) {
     event.stopPropagation()
     emit('toggle-expand', d.data.id)
@@ -176,13 +153,12 @@ export function renderTree(svgEl, container, treeData, selectedNodeId, emit, col
     emit('toggle-collapse', d.data.id)
   })
 
-  // initial zoom-to-fit: center on nodes using nodeCenter (accounts for manual positions)
+  // Initial zoom-to-fit
   if (currentTransform.k === 1 && currentTransform.x === 0 && currentTransform.y === 0) {
     if (descendants.length > 0) {
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
       for (const d of descendants) {
-        const sz = nodeSize(d)
-        const c = nodeCenter(d)
+        const sz = nodeSize(d), c = nodeCenter(d)
         minX = Math.min(minX, c.cx - sz.w / 2)
         minY = Math.min(minY, c.cy - sz.h / 2)
         maxX = Math.max(maxX, c.cx + sz.w / 2)
@@ -196,22 +172,125 @@ export function renderTree(svgEl, container, treeData, selectedNodeId, emit, col
   bgRect.call(zoom.transform, currentTransform)
 }
 
-/**
- * Render remote collaboration indicators on the SVG.
- */
+function incrementalRender(svg, g, treeData, selectedNodeId, emit, collaborationState) {
+  // Update existing nodes: positions, colors, labels, selection highlights
+  g.selectAll('g.node').each(function (d) {
+    const el = d3.select(this)
+
+    // Update position transform
+    el.transition().duration(50).attr('transform', nodeTransform(d))
+
+    // Update background color
+    el.select('rect').filter(function () {
+      return this.getAttribute('filter') !== 'url(#shadow)' && !this.classList.contains('node-body')
+    }).attr('fill', d.data.color || '#4A90D9')
+
+    // Update label text
+    const texts = el.selectAll('text').nodes()
+    if (texts.length > 0) {
+      d3.select(texts[0]).text(truncate(d.data.label || '', 20))
+    }
+
+    // Update content preview if expanded
+    el.selectAll('rect').filter(function () {
+      return this.getAttribute('y') === '34'
+    }).remove()
+    el.selectAll('text').filter(function () {
+      return this.getAttribute('font-family') === 'monospace'
+    }).remove()
+    if (d.data.expanded && d.data.content) {
+      const sz = nodeSize(d)
+      drawContentPreviewIncremental(el, d.data.content, sz)
+    }
+
+    // Update selection highlight
+    el.selectAll('rect.selection-highlight').remove()
+    if (d.data.id === selectedNodeId) {
+      const sz = nodeSize(d)
+      el.insert('rect', ':first-child')
+        .attr('class', 'selection-highlight')
+        .attr('x', -3).attr('y', -3)
+        .attr('width', sz.w + 6).attr('height', sz.h + 6)
+        .attr('rx', 12)
+        .attr('fill', 'none')
+        .attr('stroke', '#FFD700')
+        .attr('stroke-width', 3)
+        .style('pointer-events', 'none')
+    }
+
+    // Update remote editing indicator
+    el.selectAll('rect.remote-editing').remove()
+    if (collaborationState && collaborationState.isNodeBeingEdited && collaborationState.isNodeBeingEdited(d.data.id)) {
+      const sz = nodeSize(d)
+      el.append('rect')
+        .attr('class', 'remote-editing')
+        .attr('x', -3).attr('y', -3)
+        .attr('width', sz.w + 6).attr('height', sz.h + 6)
+        .attr('rx', 12)
+        .attr('fill', 'none')
+        .attr('stroke', '#FF9800')
+        .attr('stroke-width', 2.5)
+        .style('pointer-events', 'none')
+    }
+  })
+
+  // Update links
+  g.selectAll('path.link')
+    .transition().duration(50)
+    .attr('d', d => linkPath(d))
+
+  // Remote cursors
+  g.selectAll('.remote-cursor, .remote-drag-ghost').remove()
+  if (collaborationState) drawRemoteCursors(svg, g, collaborationState)
+}
+
+// ── Helpers ──
+
+function linkPath(d) {
+  const szS = nodeSize(d.source), szT = nodeSize(d.target)
+  const s = nodeCenter(d.source), t = nodeCenter(d.target)
+  return d3.linkVertical()({ source: [s.cx, s.cy + szS.h / 2], target: [t.cx, t.cy - szT.h / 2] })
+}
+
+function nodeTransform(d) {
+  const sz = nodeSize(d), c = nodeCenter(d)
+  return `translate(${c.cx - sz.w / 2}, ${c.cy - sz.h / 2})`
+}
+
+function updateLinks(nodeId, cx, cy) {
+  d3.selectAll('path.link')
+    .filter(ld => ld.source.data.id === nodeId || ld.target.data.id === nodeId)
+    .attr('d', ld => {
+      const szS = nodeSize(ld.source), szT = nodeSize(ld.target)
+      const s = ld.source.data.id === nodeId ? { cx, cy } : nodeCenter(ld.source)
+      const t = ld.target.data.id === nodeId ? { cx, cy } : nodeCenter(ld.target)
+      return d3.linkVertical()({ source: [s.cx, s.cy + szS.h / 2], target: [t.cx, t.cy - szT.h / 2] })
+    })
+}
+
+function updateLinksResize(nodeId, w, h) {
+  d3.selectAll('path.link')
+    .filter(ld => ld.source.data.id === nodeId || ld.target.data.id === nodeId)
+    .attr('d', ld => {
+      const szS = nodeSize(ld.source), szT = nodeSize(ld.target)
+      const s = nodeCenter(ld.source), t = nodeCenter(ld.target)
+      let sH = szS.h, tH = szT.h
+      if (ld.source.data.id === nodeId) sH = h
+      if (ld.target.data.id === nodeId) tH = h
+      return d3.linkVertical()({ source: [s.cx, s.cy + sH / 2], target: [t.cx, t.cy - tH / 2] })
+    })
+}
+
 function drawRemoteCursors(svg, rootG, collab) {
   const { remoteCursors, remoteDragging } = collab
   const allNodes = rootG.selectAll('g.node')
 
-  // ── Remote selection rings ──
   if (remoteCursors && remoteCursors.length > 0) {
     allNodes.each(function (d) {
       const found = remoteCursors.find(c => c.selectedNodeId === d.data.id)
       if (!found) return
-
       const el = d3.select(this)
       const sz = nodeSize(d)
-      el.selectAll('.remote-cursor').remove()
 
       el.append('rect')
         .attr('class', 'remote-cursor')
@@ -237,9 +316,7 @@ function drawRemoteCursors(svg, rootG, collab) {
     })
   }
 
-  // ── Remote dragging ghosts ──
   if (remoteDragging && remoteDragging.length > 0) {
-    rootG.selectAll('.remote-drag-ghost').remove()
     for (const drag of remoteDragging) {
       let nodeData = null
       allNodes.each(function (d) {
@@ -286,4 +363,31 @@ function setupDefs(svg) {
     .attr('orient', 'auto-start-reverse')
     .append('path')
     .attr('d', 'M 0 0 L 10 5 L 0 10 z').attr('fill', '#667788')
+}
+
+function truncate(s, max) {
+  return s.length > max ? s.slice(0, max - 1) + '\u2026' : s
+}
+
+function drawContentPreviewIncremental(el, content, sz) {
+  el.append('rect')
+    .attr('x', 0).attr('y', 34).attr('width', sz.w).attr('height', sz.h - 34)
+    .attr('fill', 'rgba(255,255,255,0.95)')
+    .style('pointer-events', 'none')
+
+  const lines = content.split('\n').filter(l => l.trim()).slice(0, 8)
+  lines.forEach((line, i) => {
+    el.append('text')
+      .attr('x', 10).attr('y', 50 + i * 18)
+      .attr('fill', '#333').attr('font-size', '11px').attr('font-family', 'monospace')
+      .style('pointer-events', 'none')
+      .text(truncate(line, 35))
+  })
+  if (content.split('\n').filter(l => l.trim()).length > 8) {
+    el.append('text')
+      .attr('x', 10).attr('y', 50 + 8 * 18)
+      .attr('fill', '#999').attr('font-size', '10px')
+      .style('pointer-events', 'none')
+      .text('\u2026 more')
+  }
 }

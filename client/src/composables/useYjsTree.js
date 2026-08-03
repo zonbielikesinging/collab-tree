@@ -89,6 +89,12 @@ export function useYjsTree(roomRef) {
     if (peerCount > 0) connected.value = true
   })
 
+  // Also listen for awareness changes (catches connections sooner)
+  rtcProvider.awareness.on('change', () => {
+    const states = rtcProvider.awareness.getStates()
+    if (states.size > 1) connected.value = true
+  })
+
   const idbPersistence = new IndexeddbPersistence(roomName, ydoc)
 
   const treeMap = ydoc.getMap('tree')
@@ -268,7 +274,7 @@ export function useYjsTree(roomRef) {
   onUnmounted(() => destroy())
 
   return {
-    ydoc, wsProvider, connected, synced,
+    ydoc, wsProvider, rtcProvider, connected, synced,
     treeData, selectedNodeId, rootId, treeMap,
     getNode, toTreeData, forceRefresh,
     addNode, updateNode, deleteNode, findParent,

@@ -4,7 +4,18 @@
       <div class="brand">
         <button class="back-btn" @click="goHome" title="返回首页">←</button>
         <span class="logo">🌲</span>
-        <span class="title">{{ canvasName }}</span>
+        <span v-if="!isEditingName" class="title" @dblclick="startEditName" :title="isOwner ? '双击重命名画布' : ''">
+          {{ canvasName }}
+        </span>
+        <input
+          v-else
+          ref="nameInput"
+          v-model="editName"
+          class="name-input"
+          @keydown.enter="confirmEditName"
+          @keydown.escape="cancelEditName"
+          @blur="confirmEditName"
+        />
       </div>
 
       <!-- Undo/Redo -->
@@ -14,6 +25,11 @@
       </div>
 
       <div class="spacer"></div>
+
+      <!-- Axis toggle -->
+      <button class="toolbar-btn" @click="showAxis = !showAxis" :title="showAxis ? '隐藏坐标轴' : '显示坐标轴'">
+        {{ showAxis ? '📐' : '📏' }}
+      </button>
 
       <!-- Remote users -->
       <UserList
@@ -40,6 +56,7 @@
         :treeData="treeData"
         :selectedNodeId="selectedNodeId"
         :collaborationState="collaborationState"
+        :showAxis="showAxis"
         @node-click="onNodeClick"
         @node-dblclick="onNodeDblClick"
         @toggle-collapse="onToggleCollapse"
@@ -152,7 +169,7 @@ import DebugPanel from '../components/DebugPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
-const { getCanvas, updateNodeCount, visitCanvas } = useCanvases()
+const { getCanvas, updateNodeCount, visitCanvas, renameCanvas } = useCanvases()
 
 // ── User identity ──
 const identity = useUserIdentity()
@@ -165,11 +182,35 @@ const userInitials = ref(identity.userInitials)
 const canvasId = computed(() => route.params.id)
 const canvas = computed(() => getCanvas(canvasId.value))
 const canvasName = computed(() => canvas.value?.name || '未命名画布')
+const isOwner = computed(() => canvas.value?.ownerId === userId)
 const room = computed(() => canvas.value?.room || `canvas-${canvasId.value}`)
+
+// ── Canvas rename ──
+const isEditingName = ref(false)
+const editName = ref('')
+const nameInput = ref(null)
+
+function startEditName() {
+  if (!isOwner.value) return
+  isEditingName.value = true
+  editName.value = canvasName.value
+  nextTick(() => nameInput.value?.focus())
+}
+function confirmEditName() {
+  if (!isEditingName.value) return
+  isEditingName.value = false
+  const newName = editName.value.trim()
+  if (newName && newName !== canvasName.value) {
+    renameCanvas(canvasId.value, newName)
+  }
+}
+function cancelEditName() {
+  isEditingName.value = false
+}
 
 // ── Yjs tree ──
 const {
-  ydoc, wsProvider, connected, synced, treeData, selectedNodeId, rootId, treeMap,
+  ydoc, wsProvider, rtcProvider, connected, synced, treeData, selectedNodeId, rootId, treeMap,
   addNode, updateNode, deleteNode,
   toggleCollapse, toggleExpand,
   moveNode, resetNodePosition, resizeNode,
@@ -185,7 +226,10 @@ const {
   updateState,
   isNodeBeingEdited, editorsForNode,
   destroy: destroyCollab
-} = useCollaboration(() => wsProvider, { userId, userName, userColor, userInitials })
+} = useCollaboration(
+  () => wsProvider,
+  () => ({ userId, userName: userName.value, userColor: userColor.value, userInitials: userInitials.value })
+)
 
 // ── Undo/Redo ──
 const { canUndo, canRedo, init: initUndo, undo, redo, handleKeydown } = useUndo(ydoc, treeMap)
@@ -200,6 +244,7 @@ const collaborationState = computed(() => ({
 
 // ── Share dialog ──
 const showShareDialog = ref(false)
+const showAxis = ref(false)
 const shareInputRef = ref(null)
 const copied = ref('')
 const tunnelUrl = ref('')
@@ -266,7 +311,7 @@ function goHome() {
   router.push('/')
 }
 
-// ── Init collaboration after provider connects ──
+// ── Init collaboration after providers connect ──
 onMounted(() => {
   // Register visit for shared canvases (auto-save to user's list)
   const canvasInfo = getCanvas(canvasId.value)
@@ -274,24 +319,28 @@ onMounted(() => {
     visitCanvas(canvasId.value, userId, canvasInfo?.name, canvasInfo?.ownerId)
   }
 
+  // Init collaboration — try immediately, retry if provider not ready
   let attempts = 0
   const tryInit = () => {
-    if (wsProvider && wsProvider.wsconnected) {
+    // rtcProvider or wsProvider might be ready
+    const hasProvider = (wsProvider && wsProvider.wsconnected) || (rtcProvider && rtcProvider.peers?.length > 0)
+    if (hasProvider || attempts >= 30) {
       initCollab()
       initUndo()
-    } else if (attempts < 50) {
-      attempts++
-      setTimeout(tryInit, 200)
+      if (attempts >= 30) console.warn('[CollabTree] Collaboration init after timeout')
     } else {
-      console.warn('[CollabTree] Collaboration init timeout after 10s')
+      attempts++
+      setTimeout(tryInit, 300)
     }
   }
   tryInit()
-  // Also listen for sync event as fallback
+
+  // Also listen for sync events as fallback
   wsProvider?.on?.('sync', () => {
-    if (!remoteUsers.value.length) {
-      initCollab()
-    }
+    if (!remoteUsers.value.length) initCollab()
+  })
+  rtcProvider?.on?.('peers', () => {
+    if (!remoteUsers.value.length) initCollab()
   })
 
   // Keyboard shortcuts
@@ -420,7 +469,18 @@ function onEditorBlur() {
 }
 .back-btn:hover { background: rgba(255,255,255,0.25); }
 .logo { font-size: 22px; }
-.title { font-weight: 700; font-size: 16px; letter-spacing: -0.3px; }
+.title { font-weight: 700; font-size: 16px; letter-spacing: -0.3px; cursor: default; }
+.name-input {
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.3);
+  border-radius: 4px;
+  color: white;
+  font-size: 16px;
+  font-weight: 700;
+  padding: 2px 8px;
+  width: 200px;
+  outline: none;
+}
 
 .undo-group {
   display: flex;
