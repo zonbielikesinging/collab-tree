@@ -24,6 +24,7 @@ export function useCollaboration(providerRef, getIdentity) {
   const remoteEditingNodeIds = ref(new Set())
   const remoteDragging = ref([])
   const remoteSelectedNodeIds = ref([])
+  const remoteCanvasName = ref(null)
 
   let awareness = null
   let localStateUpdateTimer = null
@@ -46,6 +47,7 @@ export function useCollaboration(providerRef, getIdentity) {
       selectedNodeId: null,
       editingNodeId: null,
       dragging: null,
+      canvasName: null,
       lastActive: Date.now()
     })
 
@@ -110,6 +112,13 @@ export function useCollaboration(providerRef, getIdentity) {
       remoteEditingNodeIds.value = editingIds
       remoteDragging.value = dragging
       remoteSelectedNodeIds.value = selectedIds
+
+      // Check for remote canvas name change (from owner)
+      states.forEach((state) => {
+        if (state.canvasName) {
+          remoteCanvasName.value = state.canvasName
+        }
+      })
     })
 
     return true
@@ -149,6 +158,10 @@ export function useCollaboration(providerRef, getIdentity) {
     updateState({ selectedNodeId: null, editingNodeId: null, dragging: null })
   }
 
+  function setCanvasName(name) {
+    updateState({ canvasName: name })
+  }
+
   // ── Computed helpers ──
   const onlineCount = computed(() => remoteUsers.value.length + 1)
 
@@ -176,6 +189,7 @@ export function useCollaboration(providerRef, getIdentity) {
     remoteDragging,
     remoteSelectedNodeIds,
     remoteEditingNodeIds,
+    remoteCanvasName,
     onlineCount,
 
     init,
@@ -183,6 +197,7 @@ export function useCollaboration(providerRef, getIdentity) {
     setSelectedNode,
     setEditingNode,
     setDragging,
+    setCanvasName,
     clearAll,
 
     isNodeBeingEdited,

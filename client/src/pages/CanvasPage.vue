@@ -18,17 +18,21 @@
         />
       </div>
 
-      <!-- Undo/Redo -->
-      <div class="undo-group">
-        <button class="toolbar-btn" :disabled="!canUndo" @click="undo" title="撤销 (Ctrl+Z)">↩</button>
-        <button class="toolbar-btn" :disabled="!canRedo" @click="redo" title="重做 (Ctrl+Shift+Z)">↪</button>
+      <!-- Save / Auto-save -->
+      <div class="save-group">
+        <button class="toolbar-btn" :class="{ active: autoSave }" @click="toggleAutoSave" title="自动保存">
+          {{ autoSave ? '💾' : '📁' }}
+        </button>
+        <button class="toolbar-btn" @click="manualSave" title="手动保存">
+          {{ saveStatus === 'saving' ? '⏳' : saveStatus === 'saved' ? '✅' : '⬇️' }}
+        </button>
       </div>
 
       <div class="spacer"></div>
 
       <!-- Axis toggle -->
-      <button class="toolbar-btn" @click="showAxis = !showAxis" :title="showAxis ? '隐藏坐标轴' : '显示坐标轴'">
-        {{ showAxis ? '📐' : '📏' }}
+      <button class="toolbar-btn axis-btn" :class="{ active: showAxis }" @click="showAxis = !showAxis" :title="showAxis ? '隐藏坐标轴' : '显示坐标轴'">
+        📐 <span class="axis-label">{{ showAxis ? '坐标轴' : '' }}</span>
       </button>
 
       <!-- Remote users -->
@@ -161,7 +165,6 @@ import { useYjsTree } from '../composables/useYjsTree.js'
 import { useCanvases } from '../composables/useCanvases.js'
 import { useUserIdentity } from '../composables/useUserIdentity.js'
 import { useCollaboration } from '../composables/useCollaboration.js'
-import { useUndo } from '../composables/useUndo.js'
 import TreeCanvas from '../components/TreeCanvas.vue'
 import NodeEditor from '../components/NodeEditor.vue'
 import UserList from '../components/UserList.vue'
@@ -202,6 +205,8 @@ function confirmEditName() {
   const newName = editName.value.trim()
   if (newName && newName !== canvasName.value) {
     renameCanvas(canvasId.value, newName)
+    // Broadcast rename to shared users via awareness
+    setCanvasName(newName)
   }
 }
 function cancelEditName() {
@@ -220,9 +225,9 @@ const {
 // ── Collaboration ──
 const {
   remoteUsers, remoteCursors, remoteDragging,
-  remoteEditingNodeIds, onlineCount,
+  remoteEditingNodeIds, remoteCanvasName, onlineCount,
   init: initCollab,
-  setSelectedNode, setEditingNode, setDragging,
+  setSelectedNode, setEditingNode, setDragging, setCanvasName,
   updateState,
   isNodeBeingEdited, editorsForNode,
   destroy: destroyCollab
@@ -232,7 +237,28 @@ const {
 )
 
 // ── Undo/Redo ──
-const { canUndo, canRedo, init: initUndo, undo, redo, handleKeydown } = useUndo(ydoc, treeMap)
+// Removed — undo/redo in multi-user real-time collaboration is too complex.
+// Instead: manual save + auto-save toggle.
+
+const autoSave = ref(true)  // Default: auto-save enabled
+const saveStatus = ref('')  // '', 'saving', 'saved'
+
+function manualSave() {
+  saveStatus.value = 'saving'
+  // Force sync to IndexedDB (already happening via y-indexeddb)
+  // Also sync canvas metadata to server
+  if (canvasId.value) {
+    updateNodeCount(canvasId.value, countNodes(treeData.value))
+  }
+  setTimeout(() => {
+    saveStatus.value = 'saved'
+    setTimeout(() => { saveStatus.value = '' }, 2000)
+  }, 300)
+}
+
+function toggleAutoSave() {
+  autoSave.value = !autoSave.value
+}
 
 // ── Collaboration state for TreeCanvas ──
 const collaborationState = computed(() => ({
@@ -319,6 +345,13 @@ onMounted(() => {
     visitCanvas(canvasId.value, userId, canvasInfo?.name, canvasInfo?.ownerId)
   }
 
+  // Watch for remote canvas name changes (owner renamed)
+  watch(remoteCanvasName, (newName) => {
+    if (newName && newName !== canvasName.value) {
+      renameCanvas(canvasId.value, newName)
+    }
+  })
+
   // Init collaboration — try immediately, retry if provider not ready
   let attempts = 0
   const tryInit = () => {
@@ -326,7 +359,6 @@ onMounted(() => {
     const hasProvider = (wsProvider && wsProvider.wsconnected) || (rtcProvider && rtcProvider.peers?.length > 0)
     if (hasProvider || attempts >= 30) {
       initCollab()
-      initUndo()
       if (attempts >= 30) console.warn('[CollabTree] Collaboration init after timeout')
     } else {
       attempts++
@@ -342,21 +374,12 @@ onMounted(() => {
   rtcProvider?.on?.('peers', () => {
     if (!remoteUsers.value.length) initCollab()
   })
-
-  // Keyboard shortcuts
-  window.addEventListener('keydown', onKeydown)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', onKeydown)
   destroyTree()
   destroyCollab()
 })
-
-function onKeydown(e) {
-  // Undo/Redo
-  handleKeydown(e)
-}
 
 // ── Update node count in canvas metadata ──
 function countNodes(tree) {
@@ -482,7 +505,7 @@ function onEditorBlur() {
   outline: none;
 }
 
-.undo-group {
+.save-group {
   display: flex;
   gap: 2px;
   margin-left: 8px;
@@ -499,10 +522,20 @@ function onEditorBlur() {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.15s;
+  transition: all 0.15s;
 }
 .toolbar-btn:hover:not(:disabled) { background: rgba(255,255,255,0.25); }
 .toolbar-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.toolbar-btn.active { background: rgba(46, 204, 113, 0.3); }
+
+.axis-btn {
+  width: auto;
+  padding: 0 10px;
+  gap: 4px;
+  font-size: 13px;
+}
+.axis-btn.active { background: rgba(74, 144, 217, 0.3); }
+.axis-label { font-size: 11px; font-weight: 600; }
 
 .status { display: flex; align-items: center; gap: 6px; }
 .dot {
