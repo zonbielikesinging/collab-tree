@@ -1,0 +1,13 @@
+{
+  "name": "collab-tree",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Real-time collaborative tree editor — Vue 3 + D3 + Yjs",
+  "scripts": {
+    "build": "cd client && npm install && npx vite build",
+    "start": "cd server && npm install --omit=optional && node --max-old-space-size=192 server.cjs",
+    "deploy": "npm run build && npm run start",
+    "dev:client": "cd client && npx vite --host 0.0.0.0",
+    "dev:server": "cd server && node --watch server.cjs"
+  }
+}

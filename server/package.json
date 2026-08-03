@@ -1,0 +1,17 @@
+{
+  "name": "collab-tree-server",
+  "version": "1.0.0",
+  "description": "WebSocket sync server for CollabTree — powered by Yjs + y-websocket",
+  "scripts": {
+    "start": "node server.cjs",
+    "dev": "node --watch server.cjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "y-websocket": "^2.1.0",
+    "yjs": "^13.6.21"
+  },
+  "optionalDependencies": {
+    "localtunnel": "^2.0.2"
+  }
+}

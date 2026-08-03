@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env.local
+.env.*.local
+*.log
+server/data/*.json
+!server/data/.gitkeep
+*.tar.gz
+.DS_Store
+# Docker
+collab-tree.tar.gz
