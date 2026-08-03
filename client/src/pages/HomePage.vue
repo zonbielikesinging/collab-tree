@@ -6,6 +6,12 @@
         <span class="title">CollabTree</span>
         <span class="subtitle">实时协作树状图编辑器</span>
       </div>
+      <div class="spacer"></div>
+      <!-- Profile button -->
+      <button class="profile-btn" @click="showProfileDialog = true" title="编辑个人资料">
+        <span class="profile-avatar" :style="{ background: userColor }">{{ userInitials }}</span>
+        <span class="profile-name">{{ userName }}</span>
+      </button>
     </header>
 
     <main class="home-main">
@@ -71,6 +77,32 @@
           </div>
         </div>
       </div>
+
+      <!-- Profile edit dialog -->
+      <div v-if="showProfileDialog" class="modal-overlay" @click.self="showProfileDialog = false">
+        <div class="modal" @click.stop>
+          <h3>编辑个人资料</h3>
+          <div class="profile-preview">
+            <span class="profile-avatar-lg" :style="{ background: userColor }">{{ userInitials }}</span>
+            <span class="profile-name-preview">{{ pendingName || userName }}</span>
+          </div>
+          <label class="field">
+            <span class="field-label">昵称</span>
+            <input
+              v-model="pendingName"
+              type="text"
+              class="modal-input"
+              :placeholder="userName"
+              maxlength="12"
+              @keyup.enter="saveProfile"
+            />
+          </label>
+          <div class="modal-actions">
+            <button class="btn btn-outline" @click="randomizeName">🎲 随机</button>
+            <button class="btn btn-primary" @click="saveProfile">保存</button>
+          </div>
+        </div>
+      </div>
     </main>
   </div>
 </template>
@@ -83,12 +115,41 @@ import { useUserIdentity } from '../composables/useUserIdentity.js'
 
 const router = useRouter()
 const { listCanvases, createCanvas, deleteCanvas, renameCanvas } = useCanvases()
-const { userId, userName, userColor } = useUserIdentity()
+const identity = useUserIdentity()
+const { userId, setName } = identity
+
+const userName = ref(identity.userName)
+const userColor = ref(identity.userColor)
+const userInitials = ref(identity.userInitials)
 
 const canvases = ref([])
 const renaming = ref(null)
 const renameValue = ref('')
 const renameInput = ref(null)
+
+// Profile
+const showProfileDialog = ref(false)
+const pendingName = ref('')
+
+function saveProfile() {
+  const name = pendingName.value.trim()
+  if (name) {
+    setName(name)
+    userName.value = name
+    const cleaned = name.replace(/[的吗了呢啊]/g, '')
+    userInitials.value = cleaned.slice(0, 2) || name[0]
+  }
+  showProfileDialog.value = false
+  pendingName.value = ''
+}
+
+function randomizeName() {
+  const ADJECTIVES = ['快乐','勇敢','安静','活泼','温柔','机智','可爱','帅气','优雅','灵动','敏捷','沉稳','幽默','好奇','调皮','潇洒']
+  const NOUNS = ['熊猫','海豚','兔子','狐狸','考拉','松鼠','企鹅','鹦鹉','蝴蝶','猫咪','小狗','仓鼠','斑马','羚羊','燕子','海星']
+  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)]
+  const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)]
+  pendingName.value = `${adj}的${noun}`
+}
 
 async function loadCanvases() {
   canvases.value = await listCanvases()
@@ -145,12 +206,15 @@ onMounted(async () => { await loadCanvases() })
   background: linear-gradient(135deg, #2c3e50, #34495e);
   padding: 24px 40px;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
 }
 .brand {
   display: flex;
   align-items: center;
   gap: 12px;
 }
+.spacer { flex: 1; }
 .logo { font-size: 32px; }
 .title {
   font-size: 24px;
@@ -162,6 +226,39 @@ onMounted(async () => { await loadCanvases() })
   font-size: 14px;
   color: rgba(255,255,255,0.6);
   margin-left: 4px;
+}
+
+/* Profile button in header */
+.profile-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 6px;
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.1);
+  color: white;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.profile-btn:hover {
+  background: rgba(255,255,255,0.2);
+  border-color: rgba(255,255,255,0.4);
+}
+.profile-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+.profile-name {
+  font-weight: 500;
 }
 
 .home-main {
@@ -194,6 +291,12 @@ onMounted(async () => { await loadCanvases() })
 .btn:hover { opacity: 0.85; transform: translateY(-1px); }
 .btn-primary { background: #4A90D9; color: white; }
 .btn-secondary { background: #95a5a6; color: white; }
+.btn-outline {
+  background: transparent;
+  border: 1px solid #dde;
+  color: #666;
+}
+.btn-outline:hover { background: #f5f5f5; }
 
 .empty-state {
   display: flex;
@@ -288,6 +391,37 @@ onMounted(async () => { await loadCanvases() })
   transform: scale(1.1);
 }
 
+/* Profile dialog */
+.profile-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px;
+  background: #f5f7fa;
+  border-radius: 8px;
+}
+.profile-avatar-lg {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 700;
+  color: white;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+.profile-name-preview { font-size: 18px; font-weight: 600; }
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.field-label { font-size: 12px; font-weight: 600; color: #888; }
+
 /* Modal */
 .modal-overlay {
   position: fixed;
@@ -317,7 +451,6 @@ onMounted(async () => { await loadCanvases() })
   border-radius: 6px;
   font-size: 14px;
   outline: none;
-  margin-bottom: 16px;
 }
 .modal-input:focus {
   border-color: #4A90D9;
