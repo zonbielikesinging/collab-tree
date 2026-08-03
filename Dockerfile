@@ -24,6 +24,7 @@ RUN mkdir -p /app/server/data
 ENV PORT=1234
 ENV NODE_ENV=production
 ENV DISABLE_TUNNEL=1
+ENV PUBLIC_URL=https://f5raw07a4keq-production-lu5us86c.us-central1.suga.run
 
 EXPOSE 1234
 

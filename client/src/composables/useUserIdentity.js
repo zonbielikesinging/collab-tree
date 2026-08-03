@@ -66,15 +66,23 @@ function randomName() {
 export function useUserIdentity() {
   let profile = loadProfile()
 
+  function getInitials(name) {
+    // Extract first character of meaningful words (skip 的, 了, etc.)
+    const cleaned = name.replace(/[的了吗呢啊]/g, '')
+    return cleaned.slice(0, 2) || name[0]
+  }
+
   if (profile) {
     // Already has profile — ensure id is stable
     return {
       userId: profile.id,
       userName: profile.name,
       userColor: profile.color,
+      userInitials: profile.initials || getInitials(profile.name),
       isNewUser: false,
       setName(name) {
         profile.name = name.trim()
+        profile.initials = getInitials(name.trim())
         saveProfile(profile)
       },
     }
@@ -84,16 +92,19 @@ export function useUserIdentity() {
   const id = generateId()
   const name = randomName()
   const color = assignColor(id)
-  profile = { id, name, color, createdAt: Date.now() }
+  const initials = getInitials(name)
+  profile = { id, name, color, initials, createdAt: Date.now() }
   saveProfile(profile)
 
   return {
     userId: id,
     userName: name,
     userColor: color,
+    userInitials: initials,
     isNewUser: true,
     setName(name) {
       profile.name = name.trim()
+      profile.initials = getInitials(name.trim())
       saveProfile(profile)
     },
   }

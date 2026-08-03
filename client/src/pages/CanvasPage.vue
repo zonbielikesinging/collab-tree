@@ -19,8 +19,10 @@
       <UserList
         :userName="userName"
         :userColor="userColor"
+        :userInitials="userInitials"
         :remoteUsers="remoteUsers"
         :onlineCount="onlineCount"
+        @editProfile="showProfileDialog = true"
       />
 
       <div class="status">
@@ -102,10 +104,10 @@
             </label>
           </div>
 
-          <!-- Fallback: current URL -->
+          <!-- Fallback: current URL (works for both localhost and public deploy) -->
           <div v-if="!tunnelUrl && !lanUrl" class="share-section">
             <label class="field">
-              <span class="field-label">分享链接</span>
+              <span class="field-label">🌐 分享链接</span>
               <div class="share-input-row">
                 <input type="text" :value="shareUrl" readonly class="field-input share-input" ref="shareInputRef" />
                 <button class="btn btn-primary btn-sm" @click="copyShareUrl">{{ copied === 'current' ? '已复制 ✓' : '复制' }}</button>
@@ -116,7 +118,39 @@
           <p v-if="tunnelStatus === 'connecting'" class="share-hint">⏳ 正在建立公网隧道…</p>
           <p v-else-if="tunnelUrl" class="share-hint">✅ 公网隧道已就绪！将此链接发送给任何人即可实时协作。</p>
           <p v-else-if="tunnelStatus === 'error'" class="share-hint error">⚠️ 公网隧道连接失败，请检查网络。局域网内仍可使用。</p>
+          <p v-else-if="!lanUrl" class="share-hint">✅ 将此链接发送给任何人即可实时协作编辑此画布。</p>
           <p v-else class="share-hint">将链接发送给其他人，他们可以实时协作编辑此画布。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Profile edit dialog -->
+    <div v-if="showProfileDialog" class="modal-overlay" @click.self="showProfileDialog = false">
+      <div class="modal">
+        <div class="modal-header">
+          <span>编辑个人资料</span>
+          <button class="modal-close" @click="showProfileDialog = false">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="profile-preview">
+            <span class="profile-avatar" :style="{ background: userColor }">{{ userInitials }}</span>
+            <span class="profile-name-preview">{{ pendingName || userName }}</span>
+          </div>
+          <label class="field">
+            <span class="field-label">昵称</span>
+            <input
+              v-model="pendingName"
+              type="text"
+              class="field-input"
+              :placeholder="userName"
+              maxlength="12"
+              @keyup.enter="saveProfile"
+            />
+          </label>
+          <div class="profile-actions">
+            <button class="btn btn-outline" @click="randomizeName">🎲 随机</button>
+            <button class="btn btn-primary" @click="saveProfile">保存</button>
+          </div>
         </div>
       </div>
     </div>
@@ -141,7 +175,11 @@ const router = useRouter()
 const { getCanvas, updateNodeCount } = useCanvases()
 
 // ── User identity ──
-const { userId, userName, userColor } = useUserIdentity()
+const identity = useUserIdentity()
+const { userId, setName } = identity
+const userName = ref(identity.userName)
+const userColor = ref(identity.userColor)
+const userInitials = ref(identity.userInitials)
 
 // ── Canvas ──
 const canvasId = computed(() => route.params.id)
@@ -164,9 +202,10 @@ const {
   remoteEditingNodeIds, onlineCount,
   init: initCollab,
   setSelectedNode, setEditingNode, setDragging,
+  updateState,
   isNodeBeingEdited, editorsForNode,
   destroy: destroyCollab
-} = useCollaboration(() => wsProvider, { userId, userName, userColor })
+} = useCollaboration(() => wsProvider, { userId, userName, userColor, userInitials })
 
 // ── Undo/Redo ──
 const { canUndo, canRedo, init: initUndo, undo, redo, handleKeydown } = useUndo(ydoc, treeMap)
@@ -187,7 +226,34 @@ const tunnelUrl = ref('')
 const tunnelStatus = ref('')
 const lanUrl = ref('')
 
-const shareUrl = computed(() => tunnelUrl.value || lanUrl.value || window.location.origin + '/#/canvas/' + canvasId.value)
+// ── Profile ──
+const showProfileDialog = ref(false)
+const pendingName = ref('')
+
+function saveProfile() {
+  const name = pendingName.value.trim()
+  if (name) {
+    setName(name)
+    userName.value = name
+    const cleaned = name.replace(/[的吗了呢啊]/g, '')
+    const initials = cleaned.slice(0, 2) || name[0]
+    userInitials.value = initials
+    // Update awareness so remote users see the new name
+    updateState({ name, initials })
+  }
+  showProfileDialog.value = false
+  pendingName.value = ''
+}
+
+function randomizeName() {
+  const ADJECTIVES = ['快乐','勇敢','安静','活泼','温柔','机智','可爱','帅气','优雅','灵动','敏捷','沉稳','幽默','好奇','调皮','潇洒']
+  const NOUNS = ['熊猫','海豚','兔子','狐狸','考拉','松鼠','企鹅','鹦鹉','蝴蝶','猫咪','小狗','仓鼠','斑马','羚羊','燕子','海星']
+  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)]
+  const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)]
+  pendingName.value = `${adj}的${noun}`
+}
+
+const shareUrl = computed(() => tunnelUrl.value || window.location.origin + '/#/canvas/' + canvasId.value)
 
 const isLocalhost = computed(() => {
   const host = window.location.hostname
@@ -474,4 +540,21 @@ function onEditorBlur() {
 .share-input-row { display: flex; gap: 8px; }
 .share-input { flex: 1; }
 .share-hint { font-size: 12px; color: #999; margin-top: 12px; }
+
+/* Profile */
+.profile-preview {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 16px; padding: 12px;
+  background: #f5f7fa; border-radius: 8px;
+}
+.profile-avatar {
+  width: 48px; height: 48px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; font-weight: 700; color: white;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+.profile-name-preview { font-size: 18px; font-weight: 600; }
+.profile-actions {
+  display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;
+}
 </style>

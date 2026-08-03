@@ -198,13 +198,14 @@ async function handleRequest(req, res) {
     return jsonResponse(res, readCanvases())
   }
 
-  // GET /api/tunnel — get the public tunnel URL (dev only, uses localtunnel)
+  // GET /api/tunnel — get the public tunnel URL
   if (req.method === 'GET' && req.url === '/api/tunnel') {
+    const publicUrl = tunnelUrl || process.env.PUBLIC_URL || ''
     return jsonResponse(res, {
-      url: tunnelUrl,
-      status: tunnelStatus,
-      lanUrl: `http://${getLocalIp()}:${PORT}`,
-      lanWsUrl: `ws://${getLocalIp()}:${PORT}`
+      url: publicUrl,
+      status: publicUrl ? 'connected' : tunnelStatus,
+      lanUrl: tunnelUrl ? null : `http://${getLocalIp()}:${PORT}`,
+      lanWsUrl: tunnelUrl ? null : `ws://${getLocalIp()}:${PORT}`
     })
   }
 

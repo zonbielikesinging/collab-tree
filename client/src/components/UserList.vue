@@ -1,11 +1,11 @@
 <template>
   <div class="user-list">
     <!-- Current user -->
-    <div class="user-chip" :title="userName + ' (你)'">
-      <span class="user-dot" :style="{ background: userColor }"></span>
+    <button class="user-chip me" :title="userName + ' (点击编辑)'" @click="$emit('editProfile')">
+      <span class="user-avatar" :style="{ background: userColor }">{{ userInitials }}</span>
       <span class="user-name">{{ userName }}</span>
       <span class="user-you">你</span>
-    </div>
+    </button>
 
     <!-- Remote users -->
     <div
@@ -14,7 +14,7 @@
       class="user-chip"
       :title="user.name"
     >
-      <span class="user-dot" :style="{ background: user.color }"></span>
+      <span class="user-avatar" :style="{ background: user.color }">{{ user.initials || user.name[0] }}</span>
       <span class="user-name">{{ user.name }}</span>
       <span v-if="user.editingNodeId" class="user-activity">编辑中</span>
     </div>
@@ -31,9 +31,12 @@
 defineProps({
   userName: { type: String, default: '?' },
   userColor: { type: String, default: '#999' },
+  userInitials: { type: String, default: '?' },
   remoteUsers: { type: Array, default: () => [] },
   onlineCount: { type: Number, default: 1 },
 })
+
+defineEmits(['editProfile'])
 </script>
 
 <style scoped>
@@ -46,19 +49,35 @@ defineProps({
 .user-chip {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: 12px;
+  gap: 6px;
+  padding: 2px 8px 2px 3px;
+  border-radius: 14px;
   background: rgba(255,255,255,0.1);
   font-size: 11px;
   color: white;
   white-space: nowrap;
+  border: none;
+  cursor: default;
 }
-.user-dot {
-  width: 8px;
-  height: 8px;
+.user-chip.me {
+  cursor: pointer;
+  padding-right: 6px;
+}
+.user-chip.me:hover {
+  background: rgba(255,255,255,0.2);
+}
+.user-avatar {
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: white;
   flex-shrink: 0;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.2);
 }
 .user-name {
   max-width: 80px;
