@@ -20,7 +20,7 @@ const emit = defineEmits([
   'node-click', 'node-dblclick',
   'toggle-collapse', 'toggle-expand',
   'move-node', 'move-node-preview', 'resize-node',
-  'debug-log',
+  'zoom-changed', 'debug-log',
 ])
 
 const containerRef = ref(null)
@@ -28,6 +28,10 @@ const svgRef = ref(null)
 
 function render() {
   renderTree(svgRef.value, containerRef.value, props.treeData, props.selectedNodeId, emit, props.collaborationState)
+  renderAxis()
+}
+
+function handleZoomChanged() {
   renderAxis()
 }
 
@@ -43,7 +47,6 @@ function renderAxis() {
   const g = d3svg.select('g.main')
   if (g.empty()) return
 
-  // Get current zoom transform
   const transform = g.attr('transform')
   const match = transform && transform.match(/translate\(([^,]+),\s*([^)]+)\)\s*scale\(([^)]+)\)/)
   const tx = match ? parseFloat(match[1]) : 0
@@ -52,10 +55,9 @@ function renderAxis() {
 
   const axisLayer = d3svg.append('g').attr('class', 'axis-layer')
 
-  // Calculate grid step based on zoom level
   const step = Math.pow(10, Math.round(Math.log10(200 / k)))
 
-  // X axis ticks (bottom)
+  // X axis ticks (bottom) - positive to the right
   const xStart = Math.floor((-tx / k - W) / step) * step
   const xEnd = Math.ceil((-tx / k + W) / step) * step
   for (let x = xStart; x <= xEnd; x += step) {
@@ -74,7 +76,7 @@ function renderAxis() {
       .text(x)
   }
 
-  // Y axis ticks (left)
+  // Y axis ticks (left) - positive UP (negate y for display)
   const yStart = Math.floor((-ty / k - H) / step) * step
   const yEnd = Math.ceil((-ty / k + H) / step) * step
   for (let y = yStart; y <= yEnd; y += step) {
@@ -90,14 +92,15 @@ function renderAxis() {
       .attr('font-size', `${Math.max(8, 10 / k)}px`)
       .attr('font-family', 'monospace')
       .style('pointer-events', 'none')
-      .text(y)
+      .text(-y)
   }
 }
 
 watch(() => props.treeData, () => nextTick(render), { deep: false })
 watch(() => props.selectedNodeId, () => nextTick(render))
-watch(() => props.collaborationState, () => nextTick(render), { deep: true })
 watch(() => props.showAxis, () => nextTick(renderAxis))
+// Skip collaborationState watcher - renderer uses its own collab diff cache
+// to avoid re-rendering on every awareness change
 
 let resizeTimer = null
 onMounted(() => {

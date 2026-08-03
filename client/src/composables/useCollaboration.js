@@ -4,16 +4,7 @@
 // - Editing state (who is editing which node)
 // - Dragging preview (real-time drag position before commit)
 // - Online user list
-//
-// Awareness state per user:
-// {
-//   name: string,
-//   color: string,
-//   selectedNodeId: string | null,
-//   editingNodeId: string | null,
-//   dragging: { nodeId: string, x: number, y: number } | null,
-//   lastActive: number
-// }
+// - Canvas name sync (owner broadcasts, others receive)
 
 import { ref, computed, onUnmounted } from 'vue'
 
@@ -25,6 +16,9 @@ export function useCollaboration(providerRef, getIdentity) {
   const remoteDragging = ref([])
   const remoteSelectedNodeIds = ref([])
   const remoteCanvasName = ref(null)
+
+  // Current user's own presence (so self sees own cursor/name on canvas)
+  const selfPresence = ref(null)
 
   let awareness = null
   let localStateUpdateTimer = null
@@ -47,6 +41,7 @@ export function useCollaboration(providerRef, getIdentity) {
       selectedNodeId: null,
       editingNodeId: null,
       dragging: null,
+      canvasOwnerId: null,
       canvasName: null,
       lastActive: Date.now()
     })
@@ -63,9 +58,27 @@ export function useCollaboration(providerRef, getIdentity) {
       const dragging = []
       const selectedIds = []
 
+      let selfState = null
+      let foundCanvasName = null
+
       states.forEach((state, clientId) => {
-        if (clientId === awareness.clientID) return
         if (!state.userId) return
+
+        if (clientId === awareness.clientID) {
+          // Track self presence for canvas rendering
+          selfState = {
+            clientId,
+            userId: state.userId,
+            name: state.name || '我',
+            color: state.color || '#4A90D9',
+            selectedNodeId: state.selectedNodeId || null,
+            editingNodeId: state.editingNodeId || null,
+            dragging: state.dragging || null,
+          }
+          selfPresence.value = selfState
+          return
+        }
+
         if (state.lastActive && state.lastActive < stale) return
 
         users.push({
@@ -105,6 +118,11 @@ export function useCollaboration(providerRef, getIdentity) {
             y: state.dragging.y,
           })
         }
+
+        // Only accept canvasName from the canvas owner
+        if (state.canvasName && state.canvasOwnerId && state.canvasOwnerId !== getIdentity().userId) {
+          foundCanvasName = state.canvasName
+        }
       })
 
       remoteUsers.value = users
@@ -113,12 +131,9 @@ export function useCollaboration(providerRef, getIdentity) {
       remoteDragging.value = dragging
       remoteSelectedNodeIds.value = selectedIds
 
-      // Check for remote canvas name change (from owner)
-      states.forEach((state) => {
-        if (state.canvasName) {
-          remoteCanvasName.value = state.canvasName
-        }
-      })
+      if (foundCanvasName) {
+        remoteCanvasName.value = foundCanvasName
+      }
     })
 
     return true
@@ -162,6 +177,10 @@ export function useCollaboration(providerRef, getIdentity) {
     updateState({ canvasName: name })
   }
 
+  function setCanvasOwnerId(ownerId) {
+    updateState({ canvasOwnerId: ownerId })
+  }
+
   // ── Computed helpers ──
   const onlineCount = computed(() => remoteUsers.value.length + 1)
 
@@ -190,6 +209,7 @@ export function useCollaboration(providerRef, getIdentity) {
     remoteSelectedNodeIds,
     remoteEditingNodeIds,
     remoteCanvasName,
+    selfPresence,
     onlineCount,
 
     init,
@@ -198,6 +218,7 @@ export function useCollaboration(providerRef, getIdentity) {
     setEditingNode,
     setDragging,
     setCanvasName,
+    setCanvasOwnerId,
     clearAll,
 
     isNodeBeingEdited,

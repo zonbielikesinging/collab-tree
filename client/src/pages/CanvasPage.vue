@@ -68,6 +68,7 @@
         @move-node="onMoveNode"
         @move-node-preview="onMoveNodePreview"
         @resize-node="onResizeNode"
+        @zoom-changed="onZoomChanged"
         @debug-log="onDebugLog"
       />
       <NodeEditor
@@ -207,6 +208,7 @@ function confirmEditName() {
     renameCanvas(canvasId.value, newName)
     // Broadcast rename to shared users via awareness
     setCanvasName(newName)
+    setCanvasOwnerId(userId)
   }
 }
 function cancelEditName() {
@@ -225,9 +227,9 @@ const {
 // ── Collaboration ──
 const {
   remoteUsers, remoteCursors, remoteDragging,
-  remoteEditingNodeIds, remoteCanvasName, onlineCount,
+  remoteEditingNodeIds, remoteCanvasName, selfPresence, onlineCount,
   init: initCollab,
-  setSelectedNode, setEditingNode, setDragging, setCanvasName,
+  setSelectedNode, setEditingNode, setDragging, setCanvasName, setCanvasOwnerId,
   updateState,
   isNodeBeingEdited, editorsForNode,
   destroy: destroyCollab
@@ -265,6 +267,7 @@ const collaborationState = computed(() => ({
   remoteCursors: remoteCursors.value,
   remoteDragging: remoteDragging.value,
   remoteEditingNodeIds: remoteEditingNodeIds.value,
+  selfPresence: selfPresence.value,
   isNodeBeingEdited,
 }))
 
@@ -344,6 +347,9 @@ onMounted(() => {
   if (!canvasInfo || canvasInfo.ownerId !== userId) {
     visitCanvas(canvasId.value, userId, canvasInfo?.name, canvasInfo?.ownerId)
   }
+
+  // Set canvas owner in awareness so renames are attributed correctly
+  setCanvasOwnerId(userId)
 
   // Watch for remote canvas name changes (owner renamed)
   watch(remoteCanvasName, (newName) => {
@@ -459,6 +465,7 @@ function onMoveNodePreview(id, x, y) {
 }
 function onResizeNode(id, w, h) { resizeNode(id, w, h) }
 function onResetPosition(id) { resetNodePosition(id) }
+function onZoomChanged() { /* handled by TreeCanvas watcher */ }
 function onDebugLog(msg) { addLog('info', msg) }
 function onEditorFocus() {
   if (selectedNodeId.value) setEditingNode(selectedNodeId.value)
