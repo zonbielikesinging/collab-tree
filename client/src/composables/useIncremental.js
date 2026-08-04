@@ -23,20 +23,37 @@ function truncate(s, max) {
 export function incrementalRender(g, treeData, selectedNodeId, collaborationState) {
   g.selectAll('g.node').each(function (d) {
     const el = d3.select(this)
+    const sz = nodeSize(d)
 
     // Instant position
     el.attr('transform', nodeTransform(d))
 
-    // Update background color
+    // Update background rect
     el.select('rect').filter(function () {
       return this.getAttribute('filter') !== 'url(#shadow)' && !this.classList.contains('node-body')
-    }).attr('fill', d.data.color || '#4A90D9')
+    }).attr('width', sz.w).attr('height', sz.h).attr('fill', d.data.color || '#4A90D9')
 
     // Update label
     const texts = el.selectAll('text').nodes()
     if (texts.length > 0) {
-      d3.select(texts[0]).text(truncate(d.data.label || '', 20))
+      d3.select(texts[0]).attr('x', sz.w / 2).text(truncate(d.data.label || '', 20))
     }
+
+    // Update separator line
+    el.selectAll('line').filter(function () {
+      return this.getAttribute('y1') === '34'
+    }).attr('x2', sz.w - 10)
+
+    // Update interactive handles
+    el.select('.drag-handle').attr('transform', `translate(${sz.w - 26}, 2)`)
+    el.select('.resize-handle').attr('transform', `translate(${sz.w - 14}, ${sz.h - 14})`)
+    el.select('.btn-collapse').attr('transform', `translate(${sz.w - 28}, ${sz.h - 24})`)
+    el.select('.btn-expand').attr('transform', `translate(2, ${sz.h - 24})`)
+
+    // Update child count
+    el.selectAll('text').filter(function () {
+      return this.getAttribute('font-size') === '10px'
+    }).attr('x', sz.w / 2).attr('y', sz.h - 10)
 
     // Update content preview
     updateContentPreview(el, d)

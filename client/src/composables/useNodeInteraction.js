@@ -78,8 +78,7 @@ export function wireNodeInteractions(el, d, ctx) {
  * Must match the structure created by drawNode() in useNodeDrawing.js.
  */
 function updateNodeVisuals(el, d, nw, nh) {
-  const children = el.selectAll('*').nodes()
-  // rect[0] = background, update first
+  // background rect
   el.select('rect').attr('width', nw).attr('height', nh)
 
   // label: x = nw/2, y = 24
@@ -110,6 +109,9 @@ function updateNodeVisuals(el, d, nw, nh) {
 
   // expand btn
   el.select('.btn-expand').attr('transform', `translate(2, ${nh - 24})`)
+
+  // resize handle
+  el.select('.resize-handle').attr('transform', `translate(${nw - 14}, ${nh - 14})`)
 }
 
 function wirePointerDrag(el, { onStart, onMove, onEnd }) {
