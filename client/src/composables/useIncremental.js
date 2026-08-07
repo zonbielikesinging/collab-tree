@@ -1,5 +1,6 @@
 // ── Incremental Update Helpers ──
 // Functions for updating individual node visuals without full re-render.
+// Key: skips nodes currently being dragged locally to avoid stutter.
 
 import * as d3 from 'd3'
 import { nodeTransform, linkPath } from './useSvgDefs.js'
@@ -16,13 +17,35 @@ function truncate(s, max) {
   return s.length > max ? s.slice(0, max - 1) + '…' : s
 }
 
+// Track which node is currently being dragged locally
+let localDragNodeId = null
+
 /**
- * Incremental render: update positions, colors, labels, presence.
+ * Mark a node as being dragged locally (skip incremental updates for it).
+ */
+export function markLocalDrag(nodeId) {
+  localDragNodeId = nodeId
+}
+
+/**
+ * Clear the local drag marker.
+ */
+export function clearLocalDrag() {
+  localDragNodeId = null
+}
+
+/**
+ * Incremental render: update positions, colors, labels, handles, presence.
  * NO transitions — instant updates for smooth drag.
+ * Skips the node currently being dragged locally.
  */
 export function incrementalRender(g, treeData, selectedNodeId, collaborationState) {
   g.selectAll('g.node').each(function (d) {
     const el = d3.select(this)
+
+    // Skip node being dragged locally — DOM already updated by pointer handler
+    if (d.data.id === localDragNodeId) return
+
     const sz = nodeSize(d)
 
     // Instant position
@@ -30,7 +53,8 @@ export function incrementalRender(g, treeData, selectedNodeId, collaborationStat
 
     // Update background rect
     el.select('rect').filter(function () {
-      return this.getAttribute('filter') !== 'url(#shadow)' && !this.classList.contains('node-body')
+      return !this.classList.contains('node-body') &&
+             this.getAttribute('filter') !== 'url(#shadow)'
     }).attr('width', sz.w).attr('height', sz.h).attr('fill', d.data.color || '#4A90D9')
 
     // Update label
@@ -81,6 +105,10 @@ export function incrementalRender(g, treeData, selectedNodeId, collaborationStat
 export function incrementalPresenceOnly(g, treeData, selectedNodeId, collaborationState) {
   g.selectAll('g.node').each(function (d) {
     const el = d3.select(this)
+
+    // Skip node being dragged locally
+    if (d.data.id === localDragNodeId) return
+
     updateSelectionHighlight(el, d, selectedNodeId)
     cleanupPresence(el)
     if (collaborationState) drawAllPresence(el, d, collaborationState)

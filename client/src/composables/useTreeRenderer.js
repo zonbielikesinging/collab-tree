@@ -7,7 +7,7 @@ import { buildHierarchy } from './useHierarchy.js'
 import { nodeSize, nodeCenter, drawNode, drawDragHandle, drawExpandBtn, drawCollapseBtn, drawChildCount, drawResizeHandle } from './useNodeDrawing.js'
 import { wireNodeInteractions, isInteractiveTarget } from './useNodeInteraction.js'
 import { resolveCollisions } from './useLayout.js'
-import { installZoom, setTransform, computeAutoFit } from './useCoordSystem.js'
+import { installZoom, setTransform, computeAutoFit, hasAutoFit } from './useCoordSystem.js'
 import { setupDefs, linkPath, nodeTransform, updateLinks, updateLinksResize } from './useSvgDefs.js'
 import { drawAllPresence, drawAllDragGhosts } from './usePresenceRenderer.js'
 import { incrementalRender, incrementalPresenceOnly } from './useIncremental.js'
@@ -66,8 +66,8 @@ function fullRender(svg, container, treeData, selectedNodeId, emit, collaboratio
   const g = svg.append('g').attr('class', 'main')
   setupDefs(svg)
 
-  // Install zoom with axis callback
-  const bgRect = installZoom(svg, g, W, H, () => {
+  // Install zoom — preserves previous state if re-creating
+  installZoom(svg, g, W, H, () => {
     if (emit) emit('zoom-changed')
   })
 
@@ -141,8 +141,9 @@ function fullRender(svg, container, treeData, selectedNodeId, emit, collaboratio
     emit('toggle-collapse', d.data.id)
   })
 
-  // Auto-fit
-  if (descendants.length > 0) {
+  // Auto-fit only on first render (not after structure changes from user edits)
+  if (!hasAutoFit() && descendants.length > 0) {
+    const bgRect = g.select('rect.bg')
     const t = computeAutoFit(descendants, W, H)
     setTransform(bgRect, t)
     if (emit) emit('zoom-changed')

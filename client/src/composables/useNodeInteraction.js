@@ -4,6 +4,7 @@
 
 import * as d3 from 'd3'
 import { nodeSize, nodeCenter } from './useNodeDrawing.js'
+import { markLocalDrag, clearLocalDrag } from './useIncremental.js'
 
 const MIN_W = 100, MAX_W = 600, MIN_H = 40, MAX_H = 800
 
@@ -20,6 +21,7 @@ export function wireNodeInteractions(el, d, ctx) {
       onStart() {
         dh.style.cursor = 'grabbing'
         el.raise()
+        markLocalDrag(d.data.id)
       },
       onMove(dx, dy, ev) {
         const pt = svgEl.createSVGPoint()
@@ -35,6 +37,7 @@ export function wireNodeInteractions(el, d, ctx) {
       },
       onEnd(dx, dy, ev) {
         dh.style.cursor = 'grab'
+        clearLocalDrag()
         const pt = svgEl.createSVGPoint()
         pt.x = ev.clientX; pt.y = ev.clientY
         const ctm = g.node().getScreenCTM()
@@ -53,16 +56,17 @@ export function wireNodeInteractions(el, d, ctx) {
       onStart() {
         const sz2 = nodeSize(d)
         sW = sz2.w; sH = sz2.h
+        markLocalDrag(d.data.id)
       },
       onMove(dx, dy) {
         const nw = Math.max(MIN_W, Math.min(MAX_W, sW + dx))
         const nh = Math.max(MIN_H, Math.min(MAX_H, sH + dy))
-        // Update all visual elements
         updateNodeVisuals(el, d, nw, nh)
         d3.select(rh).attr('transform', `translate(${nw - 14}, ${nh - 14})`)
         updateLinksResize(d.data.id, nw, nh)
       },
       onEnd(dx, dy) {
+        clearLocalDrag()
         const nw = Math.max(MIN_W, Math.min(MAX_W, sW + dx))
         const nh = Math.max(MIN_H, Math.min(MAX_H, sH + dy))
         emit('resize-node', d.data.id, nw, nh)

@@ -30,34 +30,16 @@
         <section v-if="myCanvases.length > 0" class="canvas-section">
           <h3 class="section-title">📁 我的画布</h3>
           <div class="canvas-grid">
-            <div
+            <CanvasCard
               v-for="canvas in myCanvases"
               :key="canvas.id"
-              class="canvas-card"
-              @click="openCanvas(canvas.id)"
-            >
-              <div class="card-preview">
-                <svg viewBox="0 0 200 120" class="card-svg">
-                  <rect x="10" y="10" width="60" height="30" rx="6" fill="#4A90D9" opacity="0.8" />
-                  <text x="40" y="29" text-anchor="middle" fill="white" font-size="10" font-weight="bold">Node</text>
-                  <line x1="40" y1="40" x2="40" y2="55" stroke="#667788" stroke-width="1.5" />
-                  <rect x="10" y="55" width="50" height="22" rx="5" fill="#27ae60" opacity="0.7" />
-                  <rect x="70" y="55" width="50" height="22" rx="5" fill="#e67e22" opacity="0.7" />
-                </svg>
-              </div>
-              <div class="card-info">
-                <div class="card-name" :title="canvas.name">{{ canvas.name }}</div>
-                <div class="card-meta">
-                  <span>{{ canvas.nodeCount }} 节点</span>
-                  <span>·</span>
-                  <span>{{ formatDate(canvas.createdAt) }}</span>
-                </div>
-              </div>
-              <div class="card-actions" @click.stop>
-                <button v-if="canvas.ownerId === userId" class="card-btn" @click="startRename(canvas)" title="重命名">✏️</button>
-                <button class="card-btn" @click="onDeleteCanvas(canvas.id)" title="删除">🗑️</button>
-              </div>
-            </div>
+              :canvas="canvas"
+              :userId="userId"
+              :isShared="false"
+              @open="openCanvas(canvas.id)"
+              @rename="startRename"
+              @delete="onDeleteCanvas"
+            />
           </div>
         </section>
 
@@ -66,33 +48,15 @@
           <div class="shared-divider"></div>
           <h3 class="section-title">🤝 协作画布</h3>
           <div class="canvas-grid">
-            <div
+            <CanvasCard
               v-for="canvas in sharedCanvases"
               :key="canvas.id"
-              class="canvas-card shared-card"
-              @click="openCanvas(canvas.id)"
-            >
-              <div class="card-preview shared-preview">
-                <svg viewBox="0 0 200 120" class="card-svg">
-                  <rect x="10" y="10" width="60" height="30" rx="6" fill="#9b59b6" opacity="0.8" />
-                  <text x="40" y="29" text-anchor="middle" fill="white" font-size="10" font-weight="bold">Node</text>
-                  <line x1="40" y1="40" x2="40" y2="55" stroke="#667788" stroke-width="1.5" />
-                  <rect x="10" y="55" width="50" height="22" rx="5" fill="#27ae60" opacity="0.7" />
-                  <rect x="70" y="55" width="50" height="22" rx="5" fill="#e67e22" opacity="0.7" />
-                </svg>
-              </div>
-              <div class="card-info">
-                <div class="card-name" :title="canvas.name">{{ canvas.name }}</div>
-                <div class="card-meta">
-                  <span class="shared-badge">🔗 分享</span>
-                  <span>·</span>
-                  <span>{{ formatDate(canvas.createdAt) }}</span>
-                </div>
-              </div>
-              <div class="card-actions" @click.stop>
-                <button class="card-btn" @click="onDeleteCanvas(canvas.id)" title="移除">🗑️</button>
-              </div>
-            </div>
+              :canvas="canvas"
+              :userId="userId"
+              :isShared="true"
+              @open="openCanvas(canvas.id)"
+              @delete="onDeleteCanvas"
+            />
           </div>
         </section>
       </template>
@@ -116,31 +80,14 @@
         </div>
       </div>
 
-      <!-- Profile edit dialog -->
-      <div v-if="showProfileDialog" class="modal-overlay" @click.self="showProfileDialog = false">
-        <div class="modal" @click.stop>
-          <h3>编辑个人资料</h3>
-          <div class="profile-preview">
-            <span class="profile-avatar-lg" :style="{ background: userColor }">{{ userInitials }}</span>
-            <span class="profile-name-preview">{{ pendingName || userName }}</span>
-          </div>
-          <label class="field">
-            <span class="field-label">昵称</span>
-            <input
-              v-model="pendingName"
-              type="text"
-              class="modal-input"
-              :placeholder="userName"
-              maxlength="12"
-              @keyup.enter="saveProfile"
-            />
-          </label>
-          <div class="modal-actions">
-            <button class="btn btn-outline" @click="randomizeName">🎲 随机</button>
-            <button class="btn btn-primary" @click="saveProfile">保存</button>
-          </div>
-        </div>
-      </div>
+      <ProfileDialog
+        :show="showProfileDialog"
+        :userName="userName"
+        :userColor="userColor"
+        :userInitials="userInitials"
+        @close="showProfileDialog = false"
+        @save="onProfileSave"
+      />
     </main>
   </div>
 </template>
@@ -150,6 +97,8 @@ import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCanvases } from '../composables/useCanvases.js'
 import { useUserIdentity } from '../composables/useUserIdentity.js'
+import CanvasCard from '../components/CanvasCard.vue'
+import ProfileDialog from '../components/ProfileDialog.vue'
 
 const router = useRouter()
 const { listCanvases, createCanvas, deleteCanvas, renameCanvas } = useCanvases()
@@ -169,26 +118,12 @@ const renameInput = ref(null)
 
 // Profile
 const showProfileDialog = ref(false)
-const pendingName = ref('')
 
-function saveProfile() {
-  const name = pendingName.value.trim()
-  if (name) {
-    setName(name)
-    userName.value = name
-    const cleaned = name.replace(/[的吗了呢啊]/g, '')
-    userInitials.value = cleaned.slice(0, 2) || name[0]
-  }
-  showProfileDialog.value = false
-  pendingName.value = ''
-}
-
-function randomizeName() {
-  const ADJECTIVES = ['快乐','勇敢','安静','活泼','温柔','机智','可爱','帅气','优雅','灵动','敏捷','沉稳','幽默','好奇','调皮','潇洒']
-  const NOUNS = ['熊猫','海豚','兔子','狐狸','考拉','松鼠','企鹅','鹦鹉','蝴蝶','猫咪','小狗','仓鼠','斑马','羚羊','燕子','海星']
-  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)]
-  const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)]
-  pendingName.value = `${adj}的${noun}`
+function onProfileSave(name) {
+  setName(name)
+  userName.value = name
+  const cleaned = name.replace(/[的吗了呢啊]/g, '')
+  userInitials.value = cleaned.slice(0, 2) || name[0]
 }
 
 async function loadCanvases() {
@@ -223,12 +158,6 @@ async function confirmRename() {
     await loadCanvases()
   }
   renaming.value = null
-}
-
-function formatDate(iso) {
-  if (!iso) return ''
-  const d = new Date(iso)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 onMounted(async () => { await loadCanvases() })
@@ -355,153 +284,6 @@ onMounted(async () => { await loadCanvases() })
   gap: 20px;
 }
 
-.canvas-card {
-  background: white;
-  border-radius: 12px;
-  overflow: hidden;
-  cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-  position: relative;
-}
-.canvas-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
-}
-
-.card-preview {
-  height: 120px;
-  background: linear-gradient(135deg, #e8ecf1, #d5dce6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.card-svg {
-  width: 100%;
-  height: 100%;
-}
-
-.card-info {
-  padding: 14px 16px;
-}
-.card-name {
-  font-size: 15px;
-  font-weight: 700;
-  color: #2c3e50;
-  margin-bottom: 6px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.card-meta {
-  font-size: 12px;
-  color: #999;
-  display: flex;
-  gap: 6px;
-}
-
-.card-actions {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  display: flex;
-  gap: 4px;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-.canvas-card:hover .card-actions {
-  opacity: 1;
-}
-.card-btn {
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: 6px;
-  background: rgba(255,255,255,0.9);
-  font-size: 14px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.1);
-  transition: all 0.15s;
-}
-.card-btn:hover {
-  background: white;
-  transform: scale(1.1);
-}
-
-/* Profile dialog */
-.profile-preview {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-  padding: 12px;
-  background: #f5f7fa;
-  border-radius: 8px;
-}
-.profile-avatar-lg {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  font-weight: 700;
-  color: white;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.2);
-}
-.profile-name-preview { font-size: 18px; font-weight: 600; }
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 16px;
-}
-.field-label { font-size: 12px; font-weight: 600; color: #888; }
-
-/* Modal */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-}
-.modal {
-  background: white;
-  border-radius: 12px;
-  padding: 24px;
-  width: 360px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
-}
-.modal h3 {
-  font-size: 16px;
-  margin-bottom: 16px;
-  color: #2c3e50;
-}
-.modal-input {
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid #dde;
-  border-radius: 6px;
-  font-size: 14px;
-  outline: none;
-}
-.modal-input:focus {
-  border-color: #4A90D9;
-  box-shadow: 0 0 0 2px rgba(74,144,217,0.15);
-}
-.modal-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
 /* Section divider for shared canvases */
 .canvas-section { margin-bottom: 32px; }
 .section-title {
@@ -515,14 +297,5 @@ onMounted(async () => { await loadCanvases() })
 .shared-divider {
   border-top: 2px dashed #e0e0e0;
   margin: 8px 0 24px;
-}
-.shared-card { border-left: 3px solid #9b59b6; }
-.shared-preview {
-  background: linear-gradient(135deg, #f3e5f5, #e8daef);
-}
-.shared-badge {
-  font-size: 11px;
-  color: #9b59b6;
-  font-weight: 600;
 }
 </style>
