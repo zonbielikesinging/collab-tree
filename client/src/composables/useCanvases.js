@@ -4,7 +4,7 @@
 // Supports "my canvases" (ownerId === userId) and "shared canvases" (visited).
 
 const STORAGE_KEY = 'collabtree_canvases'
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:1234'
+const API_BASE = ''
 
 async function apiFetch(path, options = {}) {
   try {

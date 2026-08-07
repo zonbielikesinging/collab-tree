@@ -69,31 +69,48 @@ export function useYjsTree(roomRef) {
   wsProvider.on('synced', (state) => { synced.value = synced.value || state })
 
   // WebRTC provider for P2P (works through NAT/firewalls, ideal for public deploy)
-  const rtcProvider = new WebrtcProvider(roomName, ydoc, {
-    signaling: SIGNALING_SERVERS,
-    password: null,
-    awareness: wsProvider.awareness,
-    maxConns: 30,
-    filterBcConns: true,
-    peerOpts: {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-      ]
-    }
-  })
-  providers.push(rtcProvider)
+  // When signaling servers are unreachable (e.g., DNS failure in container), gracefully degrade
+  let rtcProvider = null
+  let rtcDestroyed = false
+  try {
+    rtcProvider = new WebrtcProvider(roomName, ydoc, {
+      signaling: SIGNALING_SERVERS,
+      password: null,
+      awareness: wsProvider.awareness,
+      maxConns: 30,
+      filterBcConns: true,
+      peerOpts: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+        ]
+      }
+    })
+    providers.push(rtcProvider)
 
-  rtcProvider.on('peers', ({ added, removed, webrtcProvider }) => {
-    const peerCount = rtcProvider.peers?.length || 0
-    if (peerCount > 0) connected.value = true
-  })
+    rtcProvider.on('peers', ({ added, removed, webrtcProvider }) => {
+      const peerCount = rtcProvider.peers?.length || 0
+      if (peerCount > 0) connected.value = true
+    })
 
-  // Also listen for awareness changes (catches connections sooner)
-  rtcProvider.awareness.on('change', () => {
-    const states = rtcProvider.awareness.getStates()
-    if (states.size > 1) connected.value = true
-  })
+    // Also listen for awareness changes (catches connections sooner)
+    rtcProvider.awareness?.on('change', () => {
+      const states = rtcProvider.awareness?.getStates()
+      if (states.size > 1) connected.value = true
+    })
+
+    // Stop retrying after 30s if signaling is unreachable
+    setTimeout(() => {
+      if (!rtcDestroyed && (!rtcProvider.peers || rtcProvider.peers.length === 0)) {
+        console.warn('[CollabTree] WebRTC signaling unreachable, using WebSocket only')
+        rtcProvider.destroy()
+        rtcDestroyed = true
+      }
+    }, 30_000)
+  } catch (err) {
+    console.warn('[CollabTree] WebRTC provider init failed:', err.message)
+    rtcProvider = null
+  }
 
   const idbPersistence = new IndexeddbPersistence(roomName, ydoc)
 
